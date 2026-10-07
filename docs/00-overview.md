@@ -35,22 +35,33 @@ a tracing library in every language. That is the problem OpenTelemetry was born 
 
 ## The map
 
-```
-            metrics/            logs/                 traces/
-            (pull)              (tail stdout)         (push, in-process)
+```mermaid
+flowchart LR
+  subgraph APP["bankobs app — bankobs namespace"]
+    MET["/metrics endpoint"]
+    OUT["stdout logs"]
+    SDK["OTel SDK"]
+  end
 
-  ┌───────────────┐   scrape   ┌────────────┐
-  │  bankobs app  │◄───────────│ Prometheus │   :30909 UI
-  │  (bankobs ns) │  /metrics  └────────────┘
-  │               │
-  │   stdout ─────┼──► file on node ──► ┌──────────┐ push ┌──────┐
-  │               │        ▲   Promtail │ Promtail │─────►│ Loki │  (query API)
-  │               │        └────────────┘ (daemon) └──────┘
-  │               │
-  │  OTel SDK ────┼──────── OTLP :4317 ────────────► ┌────────┐  :30686 UI
-  └───────────────┘      (straight to Jaeger)        │ Jaeger │
-     monitoring ns backends ─────────────────────────└────────┘
+  NODE["node file<br/>/var/log/pods/*.log"]
+
+  subgraph MON["hand-built backends — monitoring namespace"]
+    PROM["Prometheus<br/>UI :9090"]
+    PT["Promtail<br/>DaemonSet"]
+    LOKI["Loki<br/>query API"]
+    JAEG["Jaeger<br/>UI :16686"]
+  end
+
+  PROM -- "PULL: scrape /metrics — no OTel" --> MET
+  OUT  -- "container stdout" --> NODE
+  NODE -- "tail" --> PT
+  PT   -- "push" --> LOKI
+  SDK  -- "PUSH: OTLP 4317 straight to Jaeger — needs OTel" --> JAEG
 ```
+
+- **Metrics (pull):** Prometheus reaches *into* the app and scrapes `/metrics`. No OTel.
+- **Logs (tail):** the app just writes stdout; Promtail tails the node's log file and pushes to Loki. No OTel.
+- **Traces (push):** the app's OTel SDK sends OTLP straight to Jaeger — the one pillar that needs in-process instrumentation.
 
 ## How to use this lab
 

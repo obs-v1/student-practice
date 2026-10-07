@@ -9,6 +9,30 @@ hand**, with no OpenTelemetry Collector:
 
 …and then shows **why OpenTelemetry exists** once you've felt the by-hand version.
 
+```mermaid
+flowchart LR
+  subgraph APP["bankobs app — bankobs namespace"]
+    MET["/metrics endpoint"]
+    OUT["stdout logs"]
+    SDK["OTel SDK"]
+  end
+
+  NODE["node file<br/>/var/log/pods/*.log"]
+
+  subgraph MON["hand-built backends — monitoring namespace"]
+    PROM["Prometheus<br/>UI :9090"]
+    PT["Promtail<br/>DaemonSet"]
+    LOKI["Loki<br/>query API"]
+    JAEG["Jaeger<br/>UI :16686"]
+  end
+
+  PROM -- "PULL: scrape /metrics — no OTel" --> MET
+  OUT  -- "container stdout" --> NODE
+  NODE -- "tail" --> PT
+  PT   -- "push" --> LOKI
+  SDK  -- "PUSH: OTLP 4317 straight to Jaeger — needs OTel" --> JAEG
+```
+
 ## Start here
 
 Read **[docs/00-overview.md](docs/00-overview.md)** — it explains the arc and how the docs and
