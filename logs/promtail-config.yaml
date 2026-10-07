@@ -1,0 +1,45 @@
+# Promtail's config — the log equivalent of Prometheus's scrape config. It discovers
+# pods, tails their container log files under /var/log/pods, attaches labels, and PUSHES
+# each line to Loki. The app does nothing: it writes to stdout, Kubernetes writes that to
+# a file on the node, and Promtail reads the file. This is why logs need zero code change
+# and zero OpenTelemetry.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: monitoring
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+    positions:
+      filename: /run/promtail/positions.yaml      # remembers how far it has read
+    clients:
+      - url: http://loki.monitoring.svc:3100/loki/api/v1/push   # where logs go
+    scrape_configs:
+      - job_name: bankobs
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          # only the application namespace
+          - source_labels: [__meta_kubernetes_namespace]
+            action: keep
+            regex: bankobs
+          # labels we can later query by in Loki ({app="upi-service"} etc.)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_label_domain]
+            target_label: domain
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          # the chart labels each pod log_format=json|raw; carry it through so you can
+          # see which services emit structured logs
+          - source_labels: [__meta_kubernetes_pod_label_log_format]
+            target_label: log_format
+          # tell promtail where this pod's log file lives on the node
+          - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            target_label: __path__
+            separator: /
+            replacement: /var/log/pods/*$1/*.log

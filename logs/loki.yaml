@@ -1,0 +1,82 @@
+# Loki — the log store. Think "Prometheus for logs": it indexes only a small set of
+# LABELS (namespace, app, pod) and keeps the raw log line as a compressed blob. It does
+# NOT parse or full-text-index every line, which is why it is cheap. No OpenTelemetry:
+# logs arrive from Promtail (next file), which simply tails container stdout.
+#
+# Single-binary, single-replica, filesystem storage — lab sizing. Production Loki is a
+# set of microservices (distributor / ingester / querier) on object storage.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: monitoring
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore: { store: inmemory }
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index: { prefix: index_, period: 24h }
+    limits_config:
+      allow_structured_metadata: true
+      reject_old_samples: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: monitoring
+  labels: { app: loki }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: loki } }
+  template:
+    metadata:
+      labels: { app: loki }
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.1.1
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - { name: http, containerPort: 3100 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/loki }
+            - { name: data,   mountPath: /loki }
+          readinessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 700Mi }
+      volumes:
+        - name: config
+          configMap: { name: loki-config }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: monitoring
+  labels: { app: loki }
+spec:
+  selector: { app: loki }
+  ports:
+    - { name: http, port: 3100, targetPort: 3100 }
