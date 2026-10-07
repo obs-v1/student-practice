@@ -27,19 +27,75 @@ OBS_NS   ?= monitoring
 BOOTCAMP ?= ../student-bootcamp
 JAEGER_OTLP ?= http://jaeger-collector.$(OBS_NS).svc:4317
 
+# ── PROVISION (run from your workstation; mirrors student-bootcamp) ──────────────
+EC2_USER        ?= ec2-user
+EC2_PASS        ?= DevOps321
+# Lazily evaluated — terraform is only shelled out to when a target uses it.
+EC2_HOST        ?= $(shell terraform output -raw public_ip 2>/dev/null)
+KIND_CLUSTER    ?= lab
+KUBE_CONTEXT    ?= lab-ec2
+KUBE_API_PORT   ?= 6443
+KUBECONFIG_OUT  ?= $(HOME)/.kube/lab-ec2.config
+SSH_OPTS        := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10
+SSH_WRAP         = $(shell command -v sshpass >/dev/null 2>&1 && echo sshpass -p '$(EC2_PASS)')
+
 export DRY                              # so scripts/*.sh can see it
 SECTION := @scripts/section.sh
 STEP    := @scripts/step.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help cluster app darken metrics logs traces all traffic \
+.PHONY: help tf-install tf-apply tf-destroy kubeconfig kube-check \
+        cluster app darken metrics logs traces all traffic \
         verify verify-metrics verify-logs verify-traces urls clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 	 | sed -E 's/:.*## /\t/' | awk -F '\t' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 	@echo ""
+	@echo "  On your WORKSTATION: make tf-apply → make kubeconfig   (provision a box + cluster)"
+	@echo "  On the BOX:          make cluster → app → metrics → logs → traces   (build the lab)"
 	@echo "  Tip: DRY=1 prints steps without running them (do-it-by-hand mode)."
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROVISION — run these from your workstation (needs terraform + AWS creds)
+#  Creates an EC2 box and an EMPTY kind cluster on it (no app). See main.tf.
+# ═══════════════════════════════════════════════════════════════════════════════
+tf-install: ## Ensure terraform is installed (workstation)
+	@command -v terraform >/dev/null 2>&1 || { \
+	  echo "✗ terraform not found. Install it: https://developer.hashicorp.com/terraform/install"; exit 1; }
+	@command -v aws >/dev/null 2>&1 || echo "  note: AWS CLI not found — make sure AWS creds are configured for terraform"
+
+tf-apply: tf-install ## Create the EC2 box + empty kind cluster (run from workstation)
+	terraform init
+	terraform apply -auto-approve
+	@echo ""
+	@echo "  ✓ box up. Next: make kubeconfig   (fetch a kubeconfig that reaches the cluster)"
+
+tf-destroy: tf-install ## Destroy the EC2 box
+	terraform init
+	terraform destroy -auto-approve
+
+kubeconfig: ## Fetch a kubeconfig for the EC2 kind cluster (uses the box's public IP)
+	@command -v ssh >/dev/null || { echo "✗ ssh not found"; exit 1; }
+	@command -v sshpass >/dev/null 2>&1 || echo "  note: sshpass not installed — ssh will prompt for the password ($(EC2_PASS))"
+	@HOST="$(EC2_HOST)"; \
+	if [ -z "$$HOST" ]; then \
+	  echo "  ✗ no EC2 host found. Run 'make tf-apply' first, or: make kubeconfig EC2_HOST=<ip>"; exit 1; fi; \
+	mkdir -p $(dir $(KUBECONFIG_OUT)); \
+	echo "→ $(EC2_USER)@$$HOST: exposing the '$(KIND_CLUSTER)' API server and fetching its kubeconfig…"; \
+	$(SSH_WRAP) ssh $(SSH_OPTS) "$(EC2_USER)@$$HOST" \
+	  "PUBLIC_IP='$$HOST' CLUSTER='$(KIND_CLUSTER)' LISTEN_PORT='$(KUBE_API_PORT)' CONTEXT_NAME='$(KUBE_CONTEXT)' bash -s" \
+	  < cluster/scripts/expose-kube-api.sh > "$(KUBECONFIG_OUT).tmp" || true; \
+	if ! grep -q 'server: https://' "$(KUBECONFIG_OUT).tmp" 2>/dev/null; then \
+	  rm -f "$(KUBECONFIG_OUT).tmp"; \
+	  echo "  ✗ no kubeconfig came back (see errors above). Try: ssh $(EC2_USER)@$$HOST 'kind get clusters'"; exit 1; fi; \
+	mv "$(KUBECONFIG_OUT).tmp" "$(KUBECONFIG_OUT)"; chmod 600 "$(KUBECONFIG_OUT)"; \
+	echo ""; echo "  ✓ wrote $(KUBECONFIG_OUT)  (context: $(KUBE_CONTEXT) → $$HOST:$(KUBE_API_PORT))"; \
+	echo "      export KUBECONFIG=$(KUBECONFIG_OUT) && kubectl get nodes"
+
+kube-check: ## Verify the fetched kubeconfig reaches the cluster
+	@[ -f "$(KUBECONFIG_OUT)" ] || { echo "✗ run 'make kubeconfig' first"; exit 1; }
+	@KUBECONFIG="$(KUBECONFIG_OUT)" kubectl get nodes
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 0 — the cluster (empty Kubernetes)

@@ -14,12 +14,28 @@ hand**, with no OpenTelemetry Collector:
 Read **[docs/00-overview.md](docs/00-overview.md)** — it explains the arc and how the docs and
 the Makefile mirror each other.
 
-## Quick start
+## Two ways to get a cluster
+
+**A — provision a box with Terraform (from your workstation), bootcamp-style:**
+```bash
+make tf-apply      # creates an EC2 box + an EMPTY kind cluster on it (no app). See main.tf.
+make kubeconfig    # writes ~/.kube/lab-ec2.config pointing at it
+export KUBECONFIG=~/.kube/lab-ec2.config && kubectl get nodes
+make tf-destroy    # when done
+```
+
+**B — use a VM you already have (run on the box itself):**
+```bash
+bash cluster/scripts/install-tools.sh    # once; then re-login so docker works without sudo
+make cluster                              # == make -C cluster up
+```
+
+Either way you then build the lab (A: with `KUBECONFIG` set, or ssh to the box; B: on the box):
+
+## Quick start (building the lab, once a cluster exists)
 
 ```bash
-# 0. an empty Kubernetes cluster on this host (see cluster/ — tools + kind)
-bash cluster/scripts/install-tools.sh   # once, on a fresh VM; then re-login for docker
-make cluster    # == make -C cluster up
+make cluster    # (path B) == make -C cluster up — skip if you used tf-apply
 
 # 1-4. build the lab on top of that cluster
 make app        # 1. deploy bankobs onto the cluster, observability OFF
@@ -37,6 +53,7 @@ Every target prints each command as it runs. To **print without running** (type 
 ## Layout
 
 ```
+main.tf    provision an EC2 box + empty kind cluster (make tf-apply), no app — like the bootcamp
 cluster/   STEP 0 — make Kubernetes available (kind on a VM): tools, kind-config, expose
 docs/      00..05  the teaching spine (read these)
 metrics/   Prometheus: namespace, RBAC, scrape config, server
