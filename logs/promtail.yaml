@@ -18,6 +18,15 @@ spec:
         - name: promtail
           image: grafana/promtail:3.1.1
           args: ["-config.file=/etc/promtail/promtail.yaml"]
+          env:
+            # Promtail only tails targets whose __host__ matches its OWN hostname.
+            # A pod's hostname is the pod name by default, but __host__ (set in the
+            # scrape config) is the NODE name — so without this they never match and
+            # ZERO targets are tailed. Make Promtail's hostname the node name.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           ports:
             - { name: http, containerPort: 9080 }
           volumeMounts:

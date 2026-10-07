@@ -138,7 +138,7 @@ metrics: ## 2. Prometheus scrapes /metrics directly (no OTel)
 	        "kubectl -n $(APP_NS) get deploy -l domain -o name | xargs -I{} kubectl -n $(APP_NS) patch {} --type=merge -p '{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"prometheus.io/scrape\":\"true\",\"prometheus.io/path\":\"/metrics\"}}}}}'"
 	@echo ""
 	@echo "  ✓ Prometheus is pulling the app's /metrics. Give it ~30s, then: make verify-metrics"
-	@$(MAKE) -s _url NP=30909 NAME=Prometheus
+	@$(MAKE) -s _url HP=9090 NAME=Prometheus
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 3 — LOGS (Loki + Promtail), no OTel
@@ -206,14 +206,19 @@ verify-traces: ## Which app services have sent traces to Jaeger?
 	   kill $$PF 2>/dev/null || true"
 
 urls: ## Print the UI URLs
-	@$(MAKE) -s _url NP=30909 NAME=Prometheus
-	@$(MAKE) -s _url NP=30686 NAME=Jaeger
+	@$(MAKE) -s _url HP=9090  NAME=Prometheus
+	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 	@echo "  Loki      (no UI): kubectl -n $(OBS_NS) port-forward svc/loki 3100:3100  ->  http://localhost:3100"
 
+# Print a UI URL. The services are NodePorts (30909/30686), but kind REMAPS those to
+# host ports 9090/16686 (see cluster/kind-config.yaml) — so the reachable address is the
+# box's PUBLIC IP on the HOST port, not the node's internal IP on the nodePort.
 _url:
-	@IP=$$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null); \
-	 [ -z "$$IP" ] && IP=$$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null); \
-	 printf "  %-10s UI: http://%s:%s\n" "$(NAME)" "$$IP" "$(NP)"
+	@TOKEN=$$(curl -s -m1 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null); \
+	 IP=$$(curl -s -m1 -H "X-aws-ec2-metadata-token: $$TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null); \
+	 [ -z "$$IP" ] && IP=$$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null); \
+	 [ -z "$$IP" ] && IP=localhost; \
+	 printf "  %-10s http://%s:%s\n" "$(NAME)" "$$IP" "$(HP)"
 
 clean: ## Remove the hand-built backends (leaves the app running)
 	$(STEP) "Delete the monitoring namespace (Prometheus, Loki, Promtail, Jaeger)" \

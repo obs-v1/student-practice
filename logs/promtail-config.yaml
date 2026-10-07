@@ -18,6 +18,10 @@ data:
       - url: http://loki.monitoring.svc:3100/loki/api/v1/push   # where logs go
     scrape_configs:
       - job_name: bankobs
+        # Kubernetes writes container stdout in the CRI log format; parse it so Loki
+        # stores the clean message (and the stream/timestamp become structured).
+        pipeline_stages:
+          - cri: {}
         kubernetes_sd_configs:
           - role: pod
         relabel_configs:
@@ -25,6 +29,10 @@ data:
           - source_labels: [__meta_kubernetes_namespace]
             action: keep
             regex: bankobs
+          # REQUIRED: promtail discovers pods cluster-wide and only tails those on ITS
+          # own node — it matches by __host__. Without this, zero targets are tailed.
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: __host__
           # labels we can later query by in Loki ({app="upi-service"} etc.)
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
