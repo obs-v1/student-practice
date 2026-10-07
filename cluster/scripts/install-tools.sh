@@ -78,8 +78,13 @@ if [ "$have_real_docker" = 0 ]; then
   esac
 fi
 sudo systemctl enable --now docker 2>/dev/null || true
-# let this user run docker without sudo (takes effect on next login / `newgrp docker`)
-sudo usermod -aG docker "$USER" 2>/dev/null || true
+# Add the LOGIN user to the docker group so they can run docker without sudo. Use
+# $SUDO_USER when this script is run via `sudo bash …` (as Terraform does) — otherwise
+# $USER is "root" and we'd grant the wrong account. Takes effect on next login
+# (or immediately via `sg docker -c '…'`, which reads /etc/group).
+DOCKER_USER="${SUDO_USER:-$USER}"
+sudo usermod -aG docker "$DOCKER_USER" 2>/dev/null || true
+echo "  (added '$DOCKER_USER' to the docker group)"
 # prove it's real docker, not the podman shim
 docker --version 2>/dev/null | grep -qi podman && \
   echo "  ⚠ 'docker' still resolves to podman — kind needs real Docker; see the docker section above" || true

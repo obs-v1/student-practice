@@ -141,10 +141,14 @@ resource "null_resource" "cluster_up" {
   triggers   = { instance_id = timestamp() }
 
   provisioner "remote-exec" {
+    # usermod -aG docker (phase 1) does NOT take effect in this new SSH session, so a
+    # plain `docker info` still fails ("docker not usable by this user"). Run under
+    # `sg docker`, which activates the docker group from /etc/group for the command
+    # without needing a re-login.
     inline = [
       "cd student-practice/cluster",
-      "make up",
-      "bash scripts/expose-kube-api.sh >/dev/null",
+      "sg docker -c 'make up'",
+      "sg docker -c 'bash scripts/expose-kube-api.sh >/dev/null'",
     ]
     connection {
       type     = "ssh"
