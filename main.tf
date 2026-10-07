@@ -27,7 +27,7 @@ variable "region" {
 }
 
 variable "ami" {
-  description = "Amazon Linux 2023 AMI (ec2-user, password auth baked in). Default is the bootcamp's us-east-1 image."
+  description = "Base AMI (ec2-user, SSH password auth baked in). Default is the bootcamp's us-east-1 image — a RHEL 9 image; install-tools.sh handles RHEL (real Docker CE + LVM disk grow)."
   default     = "ami-0220d79f3f480ecf5"
 }
 

@@ -27,15 +27,62 @@ pkg_install() {
 say "base packages (git, jq, socat, make, curl, tar)"
 pkg_install git jq socat make curl tar || true
 
-# ── docker ─────────────────────────────────────────────────────────────────────
-if ! command -v docker >/dev/null 2>&1; then
-  say "installing docker"
-  if [ "$PKG" = apt ]; then pkg_install docker.io
-  else pkg_install docker; fi
+# ── grow the disk ───────────────────────────────────────────────────────────────
+# Some RHEL AMIs ship a tiny LVM layout (e.g. /var = 2G) that does NOT fill the EBS
+# volume, so docker/kind run out of space ("no space left on device") pulling the
+# node image. If we're on that layout (a RootVG volume group), grow the partition to
+# fill the disk and hand the freed space to /var (where /var/lib/docker lives).
+if command -v vgs >/dev/null 2>&1 && sudo vgs RootVG >/dev/null 2>&1; then
+  say "expanding LVM to fill the disk (/var holds docker images)"
+  command -v growpart >/dev/null 2>&1 || sudo dnf install -y cloud-utils-growpart >/dev/null 2>&1 || true
+  PVPART="$(sudo pvs --noheadings -o pv_name 2>/dev/null | awk 'NR==1{$1=$1;print}')"
+  ROOTDEV="$(lsblk -ndo pkname "$PVPART" 2>/dev/null)"
+  PARTNUM="$(echo "$PVPART" | grep -oE '[0-9]+$')"
+  if [ -n "$ROOTDEV" ] && [ -n "$PARTNUM" ]; then
+    sudo growpart "/dev/$ROOTDEV" "$PARTNUM" || true    # grow the partition to the disk
+    sudo pvresize "$PVPART" || true                      # grow the PV into it
+    sudo lvextend -r -L 12G /dev/mapper/RootVG-rootVol 2>/dev/null || true
+    sudo lvextend -r -l +100%FREE /dev/mapper/RootVG-varVol 2>/dev/null || true
+    df -h /var 2>/dev/null | tail -1
+  fi
+fi
+
+# ── docker (REAL docker/moby — NOT podman) ──────────────────────────────────────
+# kind needs a real Docker daemon driving the node containers. The trap: on
+# RHEL/CentOS, `dnf install docker` installs the **podman-docker** shim (podman
+# pretending to be docker), and kind then falls back to the rootless-podman
+# provider and fails with "requires Delegate=yes". So on RHEL we install Docker CE
+# from Docker's own repo. Amazon Linux's `docker` package IS real moby; Ubuntu's
+# docker.io is real moby.
+. /etc/os-release 2>/dev/null || true
+have_real_docker=0
+if command -v docker >/dev/null 2>&1 && ! docker --version 2>/dev/null | grep -qi podman; then
+  have_real_docker=1
+fi
+if [ "$have_real_docker" = 0 ]; then
+  say "installing Docker (real moby/docker-ce, not podman)  [os: ${ID:-unknown}]"
+  case "${ID:-}" in
+    amzn)
+      sudo dnf install -y docker ;;
+    rhel|centos|rocky|almalinux)
+      sudo dnf remove -y podman-docker 2>/dev/null || true          # drop the fake 'docker'
+      sudo dnf -y install dnf-plugins-core 2>/dev/null || true
+      sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo 2>/dev/null \
+        || sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+      sudo dnf install -y --allowerasing docker-ce docker-ce-cli containerd.io ;;
+    ubuntu|debian)
+      sudo apt-get update -qq
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io ;;
+    *)
+      sudo "$PKG" install -y docker || true ;;
+  esac
 fi
 sudo systemctl enable --now docker 2>/dev/null || true
 # let this user run docker without sudo (takes effect on next login / `newgrp docker`)
 sudo usermod -aG docker "$USER" 2>/dev/null || true
+# prove it's real docker, not the podman shim
+docker --version 2>/dev/null | grep -qi podman && \
+  echo "  ⚠ 'docker' still resolves to podman — kind needs real Docker; see the docker section above" || true
 
 # ── kubectl (latest stable) ─────────────────────────────────────────────────────
 if ! command -v kubectl >/dev/null 2>&1; then
