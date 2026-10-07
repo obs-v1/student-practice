@@ -40,6 +40,12 @@ variable "repo_url" {
   default = "https://github.com/obs-v1/student-practice.git"
 }
 
+variable "use_spot" {
+  description = "Spot is cheap but AWS can RECLAIM it mid-lab — a 30-40 min bankobs deploy frequently gets interrupted (observed). false = on-demand (reliable, pricier). Default on-demand so the lab can actually finish."
+  type        = bool
+  default     = false
+}
+
 provider "aws" {
   region = var.region
 }
@@ -89,10 +95,15 @@ resource "aws_instance" "lab" {
 
   vpc_security_group_ids = [aws_security_group.ssh.id, aws_security_group.all_open.id]
 
-  instance_market_options {
-    market_type = "spot"
-    spot_options {
-      spot_instance_type = "one-time"
+  # Spot only when explicitly asked for (var.use_spot=true). Default is on-demand so a
+  # long deploy isn't killed by a spot reclamation.
+  dynamic "instance_market_options" {
+    for_each = var.use_spot ? [1] : []
+    content {
+      market_type = "spot"
+      spot_options {
+        spot_instance_type = "one-time"
+      }
     }
   }
 
