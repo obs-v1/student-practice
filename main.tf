@@ -97,7 +97,10 @@ resource "aws_instance" "lab" {
   }
 
   root_block_device {
-    volume_size = 100
+    # 150 GB: the full bankobs platform (75 services + Oracle/Cassandra/Kafka images +
+    # the kind node) needs it. install-tools.sh grows the LVM to hand most of this to
+    # /var (where /var/lib/docker lives). 100 GB was tight (/var ~76 GB).
+    volume_size = 150
     volume_type = "gp3"
   }
 

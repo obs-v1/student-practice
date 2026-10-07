@@ -7,4 +7,5 @@ printf '\n\033[1;33m════════════════════
 printf '\033[1;33m  SECTION %s — %s\033[0m\n' "$num" "$title"
 [ -n "$intent" ] && printf '\033[33m  %s\033[0m\n' "$intent"
 printf '\033[1;33m═══════════════════════════════════════════════════════════════\033[0m\n'
-[ "${DRY:-0}" = "1" ] && printf '\033[2m  (DRY=1 — printing steps only, nothing is applied)\033[0m\n'
+if [ "${DRY:-0}" = "1" ]; then printf '\033[2m  (DRY=1 — printing steps only, nothing is applied)\033[0m\n'; fi
+exit 0
