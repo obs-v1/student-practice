@@ -1,13 +1,12 @@
-# Provision an EC2 box and bring up an EMPTY kind cluster on it — the student-practice
-# equivalent of student-bootcamp's main.tf, but with NO app deploy and NO license. It only
-# makes Kubernetes available; you then run the lab's `make app / metrics / logs / traces`
-# against it (locally on the box, or remotely via `make kubeconfig`).
+# Provision an EC2 box and bring up an EMPTY kind cluster on it, with NO app deploy and NO
+# license. It only makes Kubernetes available; you then run the lab's `make app / metrics /
+# logs / traces` against it (locally on the box, or remotely via `make kubeconfig`).
 #
 #   make tf-apply     # create the box + kind cluster (run from your workstation)
 #   make kubeconfig   # fetch a kubeconfig that reaches it
 #   make tf-destroy   # tear the box down
 #
-# Mirrors the bootcamp's shape: a spot instance, SSH *password* auth (no key pair), two
+# Shape: a spot/on-demand instance, SSH *password* auth (no key pair), two
 # security groups (SSH + all-open), and two remote-exec phases so the docker group from
 # install-tools applies to the second (cluster-up) SSH session.
 
@@ -27,12 +26,12 @@ variable "region" {
 }
 
 variable "ami" {
-  description = "Base AMI (ec2-user, SSH password auth baked in). Default is the bootcamp's us-east-1 image — a RHEL 9 image; install-tools.sh handles RHEL (real Docker CE + LVM disk grow)."
+  description = "Base AMI (ec2-user, SSH password auth baked in). Default is a RHEL 9 us-east-1 image; install-tools.sh handles RHEL (real Docker CE + LVM disk grow)."
   default     = "ami-0220d79f3f480ecf5"
 }
 
 variable "instance_type" {
-  description = "An empty cluster is tiny; the full bankobs app (make app) wants ~8 vCPU / 32GB+. r5.4xlarge matches the bootcamp."
+  description = "An empty cluster is tiny; the full bankobs app (make app) wants ~8 vCPU / 32GB+. r5.4xlarge is a safe default."
   default     = "r5.4xlarge"
 }
 

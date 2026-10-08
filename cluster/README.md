@@ -1,8 +1,8 @@
-# ec2-kube — Kubernetes only, no application
+# cluster — Kubernetes only, no application
 
-A minimal clone of `student-bootcamp/ec2-k8s` with **all app/platform/observability deploy
-removed**. It does exactly one thing: stand up an empty single-node **kind** cluster on an
-EC2 host, ready for you to deploy anything onto (for example the `student-practice` lab).
+Stands up an empty single-node **kind** cluster on an EC2 host — **no app, platform or
+observability deploy**. One job: give you Kubernetes, ready for the rest of this lab to deploy
+onto.
 
 ## What it is / isn't
 

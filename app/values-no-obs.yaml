@@ -1,9 +1,9 @@
 # Overlay that deploys the bankobs application with observability switched OFF.
 #
 # Layered on top of the umbrella chart's own values:
-#   helm upgrade --install bankobs ../student-bootcamp/helm/bankobserve360 \
-#     -f ../student-bootcamp/helm/bankobserve360/values.yaml \
-#     -f ../student-bootcamp/ec2-k8s/values-kind.yaml \
+#   helm upgrade --install bankobs ../bankobs/helm/bankobserve360 \
+#     -f ../bankobs/helm/bankobserve360/values.yaml \
+#     -f ../bankobs/values-kind.yaml \
 #     -f values-no-obs.yaml
 #
 # This is the starting line of the lab: 75 services running, emitting nothing, collected by

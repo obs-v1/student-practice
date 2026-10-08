@@ -99,8 +99,7 @@ backends.
 - A Linux VM you can SSH to (Amazon Linux 2023 / Ubuntu, x86_64, ~8 vCPU / 16–32 GB for the
   full bankobs app). **Section 0 (`cluster/`) turns that VM into a Kubernetes cluster** — you
   don't need a cluster beforehand.
-- A bankobs **license** in `../student-bootcamp/.env` — `make app` reuses the bootcamp's
-  platform deploy, which needs it.
+- A bankobs **license** in `bankobs/.env` — the vendored platform deploy (`bankobs/`) needs it.
 - `kubectl`, `helm`, `jq` (installed by `cluster/scripts/install-tools.sh`).
 - Namespaces: the **app** lives in `bankobs`, the **backends** you build live in `monitoring`.
 

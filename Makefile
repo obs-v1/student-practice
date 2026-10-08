@@ -23,11 +23,9 @@
 
 APP_NS   ?= bankobs
 OBS_NS   ?= monitoring
-# the maintained platform deploy we reuse for the app
-BOOTCAMP ?= ../student-bootcamp
 JAEGER_OTLP ?= http://jaeger-collector.$(OBS_NS).svc:4317
 
-# ── PROVISION (run from your workstation; mirrors student-bootcamp) ──────────────
+# ── PROVISION (run from your workstation) ───────────────────────────────────────
 EC2_USER        ?= ec2-user
 EC2_PASS        ?= DevOps321
 # Lazily evaluated — terraform is only shelled out to when a target uses it.
@@ -110,8 +108,8 @@ cluster: ## 0. Create the empty kind cluster on this host
 # ───────────────────────────────────────────────────────────────────────────────
 app: ## 1. Deploy the bankobs services onto the cluster (no observability at all)
 	$(SECTION) "1" "The application, dark" "75 services running, emitting nothing, scraped by nothing."
-	$(STEP) "Deploy bankobs onto THIS cluster (reuses the bootcamp deploy; does not create a cluster)" \
-	        "$(MAKE) -C $(BOOTCAMP)/ec2-k8s deploy"
+	$(STEP) "Deploy bankobs onto THIS cluster (the vendored platform in ./bankobs)" \
+	        "$(MAKE) -C bankobs deploy"
 	@$(MAKE) --no-print-directory darken
 
 darken:  # internal: turn the app's telemetry off — the blank slate
@@ -180,7 +178,7 @@ all: app metrics logs traces ## 1→4 in order (the full by-hand build)
 # ───────────────────────────────────────────────────────────────────────────────
 traffic: ## Generate load so there is something to see (~60s)
 	$(STEP) "Drive the bankobs portal journeys for ~60s" \
-	        "timeout 60 bash $(BOOTCAMP)/scripts/loadrunner.sh || true"
+	        "timeout 60 bash scripts/loadrunner.sh || true"
 
 verify: verify-metrics verify-logs verify-traces ## Check all three pillars
 
@@ -225,4 +223,4 @@ clean: ## Remove the hand-built backends (leaves the app running)
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- || true"
-	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C $(BOOTCAMP)/ec2-k8s down)"
+	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C bankobs down)"

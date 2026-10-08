@@ -40,7 +40,7 @@ the Makefile mirror each other.
 
 ## Two ways to get a cluster
 
-**A — provision a box with Terraform (from your workstation), bootcamp-style:**
+**A — provision a box with Terraform (from your workstation):**
 ```bash
 make tf-apply      # creates an EC2 box + an EMPTY kind cluster on it (no app). See main.tf.
 make kubeconfig    # writes ~/.kube/lab-ec2.config pointing at it
@@ -77,7 +77,7 @@ Every target prints each command as it runs. To **print without running** (type 
 ## Layout
 
 ```
-main.tf    provision an EC2 box + empty kind cluster (make tf-apply), no app — like the bootcamp
+main.tf    provision an EC2 box + empty kind cluster (make tf-apply), no app
 cluster/   STEP 0 — make Kubernetes available (kind on a VM): tools, kind-config, expose
 docs/      00..05  the teaching spine (read these)
 metrics/   Prometheus: namespace, RBAC, scrape config, server
@@ -91,7 +91,7 @@ Makefile   run any section; DRY=1 to print-only
 ## Requirements
 
 - Kubernetes (validated on single-node **kind**), `kubectl`, `helm`, `jq`.
-- A bankobs license in `../student-bootcamp/.env` — `make app` reuses that deploy.
+- A bankobs license in `bankobs/.env` — the vendored platform deploy needs it.
 - App namespace `bankobs`; backends namespace `monitoring`.
 
 > Status: code complete; pending end-to-end validation on a fresh VM (see the lab's

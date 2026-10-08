@@ -1,9 +1,8 @@
 # ──────────────────────────────────────────────────────────────────────────────
-#  ec2-kube — make Kubernetes available on an EC2 host, nothing more.
+#  cluster — make Kubernetes available on an EC2 host, nothing more.
 #
-#  Same shape as student-bootcamp/ec2-k8s, but with ALL application/platform/
-#  observability deploy stripped out. The result is a bare, empty kind cluster you
-#  can deploy anything onto (e.g. the student-practice lab).
+#  Kubernetes ONLY: no application, platform or observability deploy here. The result is a
+#  bare, empty kind cluster that the rest of this lab deploys onto.
 #
 #  On a fresh VM:
 #      bash scripts/install-tools.sh   # docker, kind, kubectl, helm, jq (needs sudo)

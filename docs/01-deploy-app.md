@@ -15,24 +15,24 @@ pillar you add later is something *you* turned on.
 ## What we're deploying
 
 bankobs isn't one service — it's ~75 of them, plus the databases (Oracle, Postgres, Mongo,
-Cassandra), Kafka, RabbitMQ and a license-checker the services refuse to start without.
-Standing all that up is the *platform*, and it's already solved by the bootcamp deploy. This
-lab is about observability, not about re-deploying databases, so Section 1 **reuses** that
-deploy — pointed at the cluster you built in Section 0:
+Cassandra), Kafka, RabbitMQ and a license-checker the services refuse to start without. All of
+that — the Helm chart, the database manifests, the init scripts — lives in this repo under
+[`bankobs/`](../bankobs/), so the deploy is self-contained:
 
 ```bash
-make -C ../student-bootcamp/ec2-k8s deploy
+make -C bankobs deploy
 ```
 
-Note `deploy`, not `up`: `up` would create its *own* kind cluster, but you already have one
-from `make cluster`. `deploy` applies the platform (databases, Kafka, license-checker) onto
-the current cluster, Helm-installs the 75 application services, and wires their runtime env.
-First run pulls a lot of images and waits on slow starters (Oracle) — budget **15–40 minutes**.
-Later runs are fast.
+It applies the platform (databases, Kafka, license-checker) onto the cluster you built in
+Section 0, Helm-installs the application services, and wires their runtime env. First run pulls
+a lot of images and waits on slow starters (Oracle) — budget **15–40 minutes**; later runs are
+fast. (`make app`, below, runs this for you and then turns telemetry off.)
 
-> The bootcamp deploy does **not** deploy any observability stack (it leaves that to its own
-> Week-1 `make obs-on`). So right after it, there is no Prometheus, no Loki, no Jaeger, no OTel
-> Collector — exactly the empty canvas this lab wants.
+> This deploys **no** observability stack — no Prometheus, no Loki, no Jaeger, no OTel
+> Collector. That's the point: an empty canvas you wire up by hand in the next sections.
+
+> **License:** the images need a `LICENSE_KEY`. Put yours in `bankobs/.env`
+> (`cp bankobs/.env.example bankobs/.env`) or pass it inline: `LICENSE_KEY=... make -C bankobs deploy`.
 
 ## Start from silence
 

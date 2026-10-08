@@ -68,5 +68,5 @@ do it by hand at scale.
 
 ```bash
 make clean                               # remove Prometheus/Loki/Promtail/Jaeger; app back to dark
-make -C ../student-bootcamp/ec2-k8s down # (optional) tear the whole platform down
+make -C bankobs down                     # (optional) tear the whole platform down
 ```
