@@ -80,9 +80,10 @@ Every target prints each command as it runs. To **print without running** (type 
 main.tf    provision an EC2 box + empty kind cluster (make tf-apply), no app
 cluster/   STEP 0 — make Kubernetes available (kind on a VM): tools, kind-config, expose
 docs/      00..05  the teaching spine (read these)
-metrics/   Prometheus: namespace, RBAC, scrape config, server
-logs/      Loki + Promtail: store, RBAC, config, DaemonSet
-traces/    Jaeger all-in-one with native OTLP
+metrics/   Prometheus — Helm values (chart: prometheus-community/prometheus)
+logs/      Loki + Promtail: store, RBAC, config, DaemonSet (manifests)
+traces/    Jaeger all-in-one with native OTLP (manifest)
+correlation/ Grafana — Helm values: datasources + trace<->logs + overview dashboard
 app/       values-no-obs.yaml — the "observability OFF" overlay
 scripts/   step.sh / section.sh — the narration helpers the Makefile uses
 Makefile   run any section; DRY=1 to print-only

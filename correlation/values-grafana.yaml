@@ -1,0 +1,110 @@
+# Helm values for Grafana (chart: grafana/grafana) — the correlation pane over the three
+# backends. Replaces the hand-written Deployment/ConfigMaps; datasources, correlation wiring
+# and the overview dashboard all ride in here, installed with one `helm upgrade -i`.
+#
+# The correlation is the point:
+#   - Loki  "derivedFields": pull trace_id out of each JSON log line -> link to Jaeger (logs->trace)
+#   - Jaeger "tracesToLogsV2": from a span, query Loki for that trace id                (trace->logs)
+# Both work because bankobs logs are JSON containing "trace_id":"...".
+
+service:
+  type: NodePort
+  nodePort: 30300            # kind maps host :3000 -> this nodePort
+
+# Open straight into the UI — no login for the demo.
+grafana.ini:
+  auth:
+    disable_login_form: true
+  "auth.anonymous":
+    enabled: true
+    org_role: Admin
+
+persistence:
+  enabled: false
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus-server     # the prometheus Helm chart's server service (port 80)
+        isDefault: true
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki:3100
+        jsonData:
+          maxLines: 2000
+          derivedFields:
+            - name: TraceID
+              matcherType: regex
+              matcherRegex: '"trace_id":"(\w+)"'
+              url: '$${__value.raw}'
+              datasourceUid: jaeger
+      - name: Jaeger
+        type: jaeger
+        uid: jaeger
+        access: proxy
+        url: http://jaeger:16686
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: '-5m'
+            spanEndTimeShift: '5m'
+            filterByTraceID: false
+            customQuery: true
+            query: '{namespace="bankobs"} |= "$${__trace.traceId}"'
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+dashboards:
+  default:
+    bankobs-overview:
+      json: |
+        {
+          "uid": "bankobs-overview",
+          "title": "bankobs — services overview",
+          "schemaVersion": 39,
+          "editable": true,
+          "time": { "from": "now-15m", "to": "now" },
+          "refresh": "10s",
+          "panels": [
+            {
+              "id": 1, "type": "timeseries",
+              "title": "p95 request latency by service (seconds)",
+              "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+              "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (app, le) (rate(http_request_duration_seconds_bucket{namespace=\"bankobs\"}[1m])))", "legendFormat": "{{app}}" } ]
+            },
+            {
+              "id": 2, "type": "timeseries",
+              "title": "request rate by service (req/s)",
+              "gridPos": { "h": 9, "w": 16, "x": 0, "y": 10 },
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "targets": [ { "refId": "A", "expr": "sum by (app) (rate(http_request_duration_seconds_count{namespace=\"bankobs\"}[1m]))", "legendFormat": "{{app}}" } ]
+            },
+            {
+              "id": 3, "type": "stat",
+              "title": "services reporting metrics",
+              "gridPos": { "h": 9, "w": 8, "x": 16, "y": 10 },
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "targets": [ { "refId": "A", "expr": "count(count by (app) (up{namespace=\"bankobs\"} == 1))" } ]
+            }
+          ]
+        }

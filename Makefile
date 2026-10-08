@@ -43,7 +43,7 @@ STEP    := @scripts/step.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help tf-install tf-apply tf-destroy kubeconfig kube-check \
-        cluster app darken metrics logs traces all traffic \
+        cluster app darken metrics logs traces all correlation traffic \
         verify verify-metrics verify-logs verify-traces urls clean
 
 help: ## Show this help
@@ -122,20 +122,15 @@ darken:  # internal: turn the app's telemetry off — the blank slate
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 2 — METRICS, the pull model (Prometheus), no OTel
 # ───────────────────────────────────────────────────────────────────────────────
-metrics: ## 2. Prometheus scrapes /metrics directly (no OTel)
+metrics: ## 2. Prometheus (Helm) scrapes /metrics directly (no OTel)
 	$(SECTION) "2" "Metrics with Prometheus (the pull model)" "Prometheus reaches into the app and scrapes /metrics on a timer. No Collector."
-	$(STEP) "Create the monitoring namespace (home for the backends)" \
-	        "kubectl apply -f metrics/namespace.yaml"
-	$(STEP) "Grant Prometheus read-only access to the Kubernetes API (service discovery)" \
-	        "kubectl apply -f metrics/prometheus-rbac.yaml"
-	$(STEP) "Install the scrape config — the rules that say WHAT to pull and from WHERE" \
-	        "kubectl apply -f metrics/prometheus-config.yaml"
-	$(STEP) "Deploy the Prometheus server and wait for it" \
-	        "kubectl apply -f metrics/prometheus.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus --timeout=120s"
-	$(STEP) "Configure the app to BE monitored: opt every service into scraping" \
-	        "kubectl -n $(APP_NS) get deploy -l domain -o name | xargs -I{} kubectl -n $(APP_NS) patch {} --type=merge -p '{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"prometheus.io/scrape\":\"true\",\"prometheus.io/path\":\"/metrics\"}}}}}'"
+	$(STEP) "Add the Prometheus Helm repo" \
+	        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update prometheus-community"
+	$(STEP) "Install Prometheus (server only) — brings its own RBAC + scrape config (metrics/values.yaml)" \
+	        "helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=180s"
 	@echo ""
-	@echo "  ✓ Prometheus is pulling the app's /metrics. Give it ~30s, then: make verify-metrics"
+	@echo "  ✓ Prometheus is pulling the app's /metrics (the bankobs pods already carry the"
+	@echo "    prometheus.io/scrape annotation). Give it ~30s, then: make verify-metrics"
 	@$(MAKE) -s _url HP=9090 NAME=Prometheus
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -174,6 +169,19 @@ all: app metrics logs traces ## 1→4 in order (the full by-hand build)
 	@echo "    three configs. OTel's Collector + SDK is what collapses all of that into one."
 
 # ───────────────────────────────────────────────────────────────────────────────
+#  CORRELATION — Grafana (Helm) over all three backends: the trace<->logs payoff
+# ───────────────────────────────────────────────────────────────────────────────
+correlation: ## Grafana (Helm) over all 3 backends — dashboards + trace<->logs
+	$(SECTION) "C" "Correlation in Grafana" "One pane over Prometheus+Loki+Jaeger — click from a trace to its logs and back."
+	$(STEP) "Add the Grafana Helm repo" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
+	$(STEP) "Install Grafana with datasources + trace<->logs wiring + overview dashboard" \
+	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f correlation/values-grafana.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
+	@echo ""
+	@echo "  ✓ Grafana up — open it (dashboard 'bankobs — services overview'):"
+	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+# ───────────────────────────────────────────────────────────────────────────────
 #  TRAFFIC + VERIFY + URLS + CLEAN
 # ───────────────────────────────────────────────────────────────────────────────
 traffic: ## Generate load so there is something to see (~60s)
@@ -184,7 +192,7 @@ verify: verify-metrics verify-logs verify-traces ## Check all three pillars
 
 verify-metrics: ## How many app targets is Prometheus scraping?
 	$(STEP) "Ask Prometheus how many bankobs targets are UP" \
-	  "kubectl -n $(OBS_NS) port-forward svc/prometheus 9090:9090 >/dev/null 2>&1 & PF=$$!; sleep 4; \
+	  "kubectl -n $(OBS_NS) port-forward svc/prometheus-server 9090:80 >/dev/null 2>&1 & PF=$$!; sleep 4; \
 	   echo -n '  bankobs targets up: '; \
 	   curl -s 'http://localhost:9090/api/v1/query?query=up%7Bnamespace%3D%22$(APP_NS)%22%7D' | jq '[.data.result[]|select(.value[1]==\"1\")]|length'; \
 	   kill $$PF 2>/dev/null || true"
@@ -206,6 +214,7 @@ verify-traces: ## Which app services have sent traces to Jaeger?
 urls: ## Print the UI URLs
 	@$(MAKE) -s _url HP=9090  NAME=Prometheus
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
+	@$(MAKE) -s _url HP=3000  NAME=Grafana
 	@echo "  Loki      (no UI): kubectl -n $(OBS_NS) port-forward svc/loki 3100:3100  ->  http://localhost:3100"
 
 # Print a UI URL. The services are NodePorts (30909/30686), but kind REMAPS those to
@@ -218,8 +227,10 @@ _url:
 	 [ -z "$$IP" ] && IP=localhost; \
 	 printf "  %-10s http://%s:%s\n" "$(NAME)" "$$IP" "$(HP)"
 
-clean: ## Remove the hand-built backends (leaves the app running)
-	$(STEP) "Delete the monitoring namespace (Prometheus, Loki, Promtail, Jaeger)" \
+clean: ## Remove the backends (leaves the app running)
+	$(STEP) "Uninstall the Helm releases (Prometheus, Grafana) incl. their cluster RBAC" \
+	        "helm -n $(OBS_NS) uninstall prometheus grafana 2>/dev/null || true"
+	$(STEP) "Delete the monitoring namespace (Loki, Promtail, Jaeger, + anything left)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- || true"

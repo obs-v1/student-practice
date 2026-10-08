@@ -1,8 +1,0 @@
-# The hand-built observability backends all live in one namespace, `monitoring`,
-# kept separate from the application namespace (`bankobs`). That separation is the
-# whole point of this lab: the app knows nothing about these tools, and these tools
-# reach into the app from the outside.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: monitoring

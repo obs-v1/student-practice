@@ -1,0 +1,59 @@
+# Helm values for the Prometheus server (chart: prometheus-community/prometheus).
+# Replaces the hand-written namespace/RBAC/config/Deployment manifests — the chart brings its
+# own ServiceAccount + RBAC (for pod discovery) and the server. We keep it lean (server only)
+# and still teach the pull model: the scrape config below is the same annotation-based
+# discovery, reaching into each bankobs pod's /metrics. Installed with one `helm upgrade -i`.
+
+# Lean install — just the server. No Alertmanager/pushgateway/exporters for this lab.
+alertmanager:            { enabled: false }
+prometheus-pushgateway:  { enabled: false }
+kube-state-metrics:      { enabled: false }
+prometheus-node-exporter:{ enabled: false }
+
+server:
+  retention: 6h
+  service:
+    type: NodePort
+    nodePort: 30909        # kind maps host :9090 -> this nodePort
+  # keep it small on the single node
+  resources:
+    requests: { cpu: 100m, memory: 300Mi }
+    limits:   { memory: 800Mi }
+
+# THE pull model, as Helm values instead of a separate ConfigMap. Prometheus discovers pods
+# and scrapes only those in the bankobs namespace that carry prometheus.io/scrape=true, using
+# their prometheus.io/path + prometheus.io/port. The relabels also set app/namespace/pod so the
+# dashboard can group by service.
+serverFiles:
+  prometheus.yml:
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+      - job_name: bankobs-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace]
+            action: keep
+            regex: bankobs
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_label_domain]
+            target_label: domain
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod

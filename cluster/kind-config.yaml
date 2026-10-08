@@ -11,7 +11,15 @@ nodes:
     # Kubernetes version pinned so it doesn't drift with the kind binary.
     # Needs kind >= v0.32.0 (see scripts/install-tools.sh).
     image: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+    # The whole bankobs fleet (~75 services) + databases + the hand-built monitoring stack runs
+    # on this ONE node. kubelet's default cap is 110 pods — too low once the backends are added,
+    # and rollout churn tips it over ("0/1 nodes available: Too many pods"). Raise it well clear.
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        maxPods: 250
     extraPortMappings:
       - { containerPort: 30080, hostPort: 80,    protocol: TCP }   # bankobs web portal (make traffic)
       - { containerPort: 30909, hostPort: 9090,  protocol: TCP }   # Prometheus UI
       - { containerPort: 30686, hostPort: 16686, protocol: TCP }   # Jaeger UI
+      - { containerPort: 30300, hostPort: 3000,  protocol: TCP }   # Grafana UI (correlation)

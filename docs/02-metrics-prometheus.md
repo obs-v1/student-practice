@@ -15,52 +15,32 @@ OTLP to a Collector. Here, **Prometheus pulls**: on a schedule (every 15s) it ma
 GET to each target's `/metrics` and stores whatever numbers come back. The app doesn't know
 Prometheus exists. It just exposes a page of numbers and goes about its business.
 
-For that to work Prometheus needs two things, which are the two files you'll apply:
-
-1. **Who to ask** — a *scrape config* telling it how to find the targets.
-2. **Permission to look** — RBAC, so it can ask the Kubernetes API "what pods exist?"
+Prometheus finds its targets by *service discovery* — it asks the Kubernetes API "what pods
+exist?" and scrapes the ones that opt in with the `prometheus.io/scrape: "true"` annotation
+(bankobs pods already carry it). The rules for that live in a **scrape config**.
 
 ## Setting it up
 
-**1. A home for the backends**
+We install Prometheus with its Helm chart — one command instead of hand-writing the
+namespace, RBAC, config and Deployment. The chart brings its own ServiceAccount + RBAC (for
+pod discovery) and the server; our [`metrics/values.yaml`](../metrics/values.yaml) keeps it
+lean (server only) and supplies the scrape config.
+
 ```bash
-kubectl apply -f metrics/namespace.yaml          # creates the `monitoring` namespace
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update prometheus-community
+
+helm upgrade --install prometheus prometheus-community/prometheus \
+  -n monitoring --create-namespace -f metrics/values.yaml
+
+kubectl -n monitoring rollout status deploy/prometheus-server
 ```
 
-**2. Let Prometheus discover pods** — it finds targets by asking the Kubernetes API, so it
-needs read access (this is *service discovery*):
-```bash
-kubectl apply -f metrics/prometheus-rbac.yaml    # ServiceAccount + ClusterRole + binding
-```
-
-**3. The scrape config** — the heart of the pull model. Open
-[`metrics/prometheus-config.yaml`](../metrics/prometheus-config.yaml) and read the
-`bankobs-pods` job. In plain English its `relabel_configs` say:
-- discover **every** pod in the cluster, then
-- **keep** only those in the `bankobs` namespace, then
-- **keep** only those with the annotation `prometheus.io/scrape: "true"`, then
-- scrape them at the `prometheus.io/path` (`/metrics`) on the `prometheus.io/port`.
-```bash
-kubectl apply -f metrics/prometheus-config.yaml
-```
-
-**4. The Prometheus server itself:**
-```bash
-kubectl apply -f metrics/prometheus.yaml
-kubectl -n monitoring rollout status deploy/prometheus --timeout=120s
-```
-
-**5. Configure the app to BE monitored.** This is the "configure the chart so the app is
-scraped" step. The bankobs pods expose `/metrics` already; here we assert the opt-in
-annotation on every service so Prometheus's rule (step 3) matches them:
-```bash
-kubectl -n bankobs get deploy -l domain -o name \
- | xargs -I{} kubectl -n bankobs patch {} --type=merge \
-     -p '{"spec":{"template":{"metadata":{"annotations":{"prometheus.io/scrape":"true","prometheus.io/path":"/metrics"}}}}}'
-```
-> In a from-scratch Helm chart, this annotation block in the pod template *is* the one piece
-> of config that opts a service into Prometheus. That's the whole integration — an annotation
-> and a scrape rule. No SDK, no exporter in the app.
+Open [`metrics/values.yaml`](../metrics/values.yaml) and read the `bankobs-pods` scrape job —
+that's the pull model in config form. In plain English its `relabel_configs` say: discover
+every pod, **keep** only those in the `bankobs` namespace with `prometheus.io/scrape: "true"`,
+and scrape them at their `prometheus.io/path` on their `prometheus.io/port`. No SDK, no
+exporter in the app — just a scraper reaching in.
 
 ## Check Prometheus
 
