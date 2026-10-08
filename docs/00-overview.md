@@ -1,6 +1,6 @@
-# Observability by hand — the three pillars without OpenTelemetry
+# Observability by hand (no OpenTelemetry)
 
-## Why this lab exists
+## Why this lab
 
 In the main course, bankobs ships **everything** through OpenTelemetry: metrics, logs and
 traces all leave each service as OTLP, hit an **OpenTelemetry Collector**, and the Collector
@@ -18,7 +18,7 @@ By the end you'll have working metrics, logs and traces built three completely d
 ways. Then (docs/05) you'll see why OpenTelemetry was invented — because doing it by hand is
 exactly the pain OTel removes.
 
-## The one surprise, up front
+## The catch
 
 Two of the three pillars need **nothing** from the application:
 
@@ -33,7 +33,7 @@ tool can collect from the outside. A **trace** has to be stitched together *insi
 service as the request passes through — which means in-process instrumentation, which means
 a tracing library in every language. That is the problem OpenTelemetry was born to solve.
 
-## The map
+## How it fits together
 
 ```mermaid
 flowchart LR
@@ -63,7 +63,7 @@ flowchart LR
 - **Logs (tail):** the app just writes stdout; Promtail tails the node's log file and pushes to Loki. No OTel.
 - **Traces (push):** the app's OTel SDK sends OTLP straight to Jaeger — the one pillar that needs in-process instrumentation.
 
-## How to use this lab
+## Running the lab
 
 Every section exists **twice**, saying the same thing:
 

@@ -1,4 +1,4 @@
-# Section 1 — The application, with observability OFF
+# 1. Deploy the app with observability off
 
 **Goal:** get the 75 bankobs services running and completely silent — nothing collecting
 metrics, nothing collecting logs, nothing collecting traces. A true blank slate, so every
@@ -12,7 +12,7 @@ pillar you add later is something *you* turned on.
 
 ---
 
-## What "the app" actually is
+## What we're deploying
 
 bankobs isn't one service — it's ~75 of them, plus the databases (Oracle, Postgres, Mongo,
 Cassandra), Kafka, RabbitMQ and a license-checker the services refuse to start without.
@@ -34,43 +34,31 @@ Later runs are fast.
 > Week-1 `make obs-on`). So right after it, there is no Prometheus, no Loki, no Jaeger, no OTel
 > Collector — exactly the empty canvas this lab wants.
 
-## Making "silent" explicit
+## Start from silence
 
-Even with no backends, the services' telemetry SDKs are configured on by default, so they'd
-*try* to export (and fail, loudly, against a Collector that isn't there). We switch them fully
-off so the starting state is unambiguous:
+bankobs is OpenTelemetry-instrumented, so each service would otherwise try to export
+telemetry on startup. There's no backend to receive it yet, so we turn the SDK off and begin
+from a clean slate:
 
 ```bash
-kubectl -n bankobs set env deployment -l domain \
-  OTEL_SDK_DISABLED=true \
-  OBSERVABILITY_MODE=dark \
-  MANAGEMENT_TRACING_ENABLED=false \
-  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=false
+kubectl -n bankobs set env deployment -l domain OTEL_SDK_DISABLED=true
 ```
 
-- `-l domain` selects every application deployment (they all carry a `domain` label; the
-  databases and platform pods do not, so they're left alone).
-- `OTEL_SDK_DISABLED=true` tells the OpenTelemetry SDK inside each service to do nothing.
-- `OBSERVABILITY_MODE=dark` is bankobs's own switch for the same idea.
+(`-l domain` hits the application services only — the databases and platform pods aren't
+labelled `domain`.) That's the only setting we touch here. Everything else you'll switch on
+yourself, one section at a time, as each backend goes in.
 
-All the app deployments roll once (in parallel) and come back silent.
-
-## Check it
+## Check it worked
 
 ```bash
 kubectl -n bankobs get pods | head
 ```
 
 You should see the services `Running`. Nothing is scraping them, nothing is tailing their
-logs, nothing is receiving traces — because none of those tools exist yet. That's the point.
+logs, nothing is receiving traces, because none of those tools exist yet.
 
-**Two bits of latent config worth knowing about** (we'll use them later, honestly):
-- Each app pod carries `prometheus.io/scrape` / `prometheus.io/path` annotations — inert
-  until *you* deploy a Prometheus that acts on them (Section 2).
-- Each service's OTLP endpoint env exists but is disabled by `OTEL_SDK_DISABLED=true` — you'll
-  re-enable only the traces slice in Section 4.
-
-A truly greenfield app would start with neither; bankobs ships them, so we neutralize them and
-light them up deliberately.
+The services do already expose a `/metrics` endpoint and write to stdout — that's just how
+they're built. Those outputs sit there unused until you add a backend to collect them, which
+is what the next three sections do, one at a time.
 
 ➡ Next: [02-metrics-prometheus.md](02-metrics-prometheus.md) — `make metrics`

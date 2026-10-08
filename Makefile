@@ -114,9 +114,9 @@ app: ## 1. Deploy the bankobs services onto the cluster (no observability at all
 	        "$(MAKE) -C $(BOOTCAMP)/ec2-k8s deploy"
 	@$(MAKE) --no-print-directory darken
 
-darken:  # internal: force every app service to emit nothing — the blank slate
-	$(STEP) "Switch ALL application telemetry OFF (the true starting line)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OBSERVABILITY_MODE=dark MANAGEMENT_TRACING_ENABLED=false MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=false"
+darken:  # internal: turn the app's telemetry off — the blank slate
+	$(STEP) "Turn the app's telemetry off (one switch — you add the rest, section by section)" \
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true"
 	@echo ""
 	@echo "  ✓ bankobs is up and SILENT. Nothing is collecting metrics, logs or traces."
 	@echo "    Next:  make metrics"
@@ -163,8 +163,8 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	$(SECTION) "4" "Traces with Jaeger" "Point the app's OTLP straight at Jaeger — no Collector. But note WHY the app can speak OTLP at all (docs/04)."
 	$(STEP) "Deploy Jaeger all-in-one with its native OTLP receiver, and wait" \
 	        "kubectl apply -f traces/jaeger.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=120s"
-	$(STEP) "Point ONLY traces at Jaeger directly (metrics+logs stay on Prometheus/Loki)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false OBSERVABILITY_MODE=full MANAGEMENT_TRACING_ENABLED=true OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_PROTOCOL=grpc OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP)"
+	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP)"
 	@echo ""
 	@echo "  ✓ Traces are going app → Jaeger directly. Generate traffic, then: make verify-traces"
 	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
@@ -223,6 +223,6 @@ _url:
 clean: ## Remove the hand-built backends (leaves the app running)
 	$(STEP) "Delete the monitoring namespace (Prometheus, Loki, Promtail, Jaeger)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
-	$(STEP) "Return the app to dark (undo the trace wiring)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OBSERVABILITY_MODE=dark MANAGEMENT_TRACING_ENABLED=false OTEL_TRACES_EXPORTER- OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- OTEL_EXPORTER_OTLP_PROTOCOL- || true"
+	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- || true"
 	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C $(BOOTCAMP)/ec2-k8s down)"

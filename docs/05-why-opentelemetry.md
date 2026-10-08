@@ -1,8 +1,8 @@
-# Section 5 — Now, why OpenTelemetry
+# 5. So why OpenTelemetry?
 
 You just built all three pillars by hand. Stand back and look at what that took.
 
-## Three pillars, three completely different mechanisms
+## Three pillars, three different mechanisms
 
 | Pillar | How you collected it | Who did the work | App change |
 |--------|----------------------|------------------|------------|
@@ -23,7 +23,7 @@ the same way.
 
 **That is the problem OpenTelemetry was built to solve.**
 
-## What OTel collapses
+## What OpenTelemetry collapses
 
 OpenTelemetry attacks the mess from both ends:
 
@@ -49,7 +49,7 @@ Change one line in the Collector, touch no service. Add a new backend? Add one e
   3 mechanisms, 3 agents, 3 configs         1 protocol, 1 agent, 1 config, swappable backends
 ```
 
-## The sharpest point — from Section 4
+## The real point
 
 Metrics and logs, you collected with **zero** OpenTelemetry: the app exposed a page and wrote
 to stdout, and tools reached in from outside. You could run that forever without OTel.

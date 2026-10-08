@@ -1,4 +1,4 @@
-# Section 2 — Metrics with Prometheus (the pull model)
+# 2. Metrics with Prometheus
 
 **Goal:** stand up Prometheus and have it collect metrics from every bankobs service —
 **without OpenTelemetry**. Prometheus will reach into the app and *pull* `/metrics` on a
@@ -8,7 +8,7 @@ timer. The app pushes nothing.
 
 ---
 
-## The one idea: Prometheus pulls
+## Prometheus pulls, the app doesn't push
 
 This is the opposite of how the OTel course does it. There, each service *pushes* metrics as
 OTLP to a Collector. Here, **Prometheus pulls**: on a schedule (every 15s) it makes an HTTP
@@ -20,7 +20,7 @@ For that to work Prometheus needs two things, which are the two files you'll app
 1. **Who to ask** — a *scrape config* telling it how to find the targets.
 2. **Permission to look** — RBAC, so it can ask the Kubernetes API "what pods exist?"
 
-## The steps (what `make metrics` runs)
+## Setting it up
 
 **1. A home for the backends**
 ```bash
@@ -62,7 +62,7 @@ kubectl -n bankobs get deploy -l domain -o name \
 > of config that opts a service into Prometheus. That's the whole integration — an annotation
 > and a scrape rule. No SDK, no exporter in the app.
 
-## See it work
+## Check Prometheus
 
 ```bash
 make verify-metrics          # prints how many bankobs targets are UP
@@ -76,7 +76,7 @@ If targets are `DOWN`, the usual causes: the pod isn't exposing `/metrics` on th
 port, or the annotation/port don't match. Check one pod:
 `kubectl -n bankobs get pod <name> -o jsonpath='{.metadata.annotations}'`.
 
-## What you just proved
+## Recap
 
 Metrics needed **zero** OpenTelemetry. The app exposed a `/metrics` page (a decades-old
 convention), and a pull-based scraper collected it. Hold that thought — logs will be just as

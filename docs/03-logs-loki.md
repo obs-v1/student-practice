@@ -1,4 +1,4 @@
-# Section 3 — Logs with Loki + Promtail
+# 3. Logs with Loki and Promtail
 
 **Goal:** collect every bankobs service's logs into Loki — **without OpenTelemetry** and
 **without touching the app**. The app already writes to stdout; we just go and read it.
@@ -7,7 +7,7 @@
 
 ---
 
-## The one idea: the logs are already on disk
+## The logs are already on disk
 
 When a container writes to stdout, Kubernetes captures it into a file on the node
 (`/var/log/pods/...`). So the logs already exist as plain files — we don't need the app to
@@ -27,7 +27,7 @@ only the labels (cheap) and keeps the raw line compressed — so you query by la
 
 Nothing here is OpenTelemetry, and the app is a bystander.
 
-## The steps (what `make logs` runs)
+## Setting it up
 
 **1. Let Promtail discover pods** (same service-discovery idea as Prometheus, so it can label
 each log line with its pod):
@@ -59,7 +59,7 @@ kubectl -n monitoring rollout status daemonset/promtail --timeout=120s
 Notice step 2–4 touched **only** the backends. There was no "configure the app" step like
 metrics had — because logs require nothing from the app at all.
 
-## See it work
+## Check Loki
 
 Generate some traffic first so there are fresh logs, then query Loki:
 
@@ -84,7 +84,7 @@ Loki has no UI of its own. Two ways to read it:
 The `log_format` label (`json` or `raw`) is carried through from the chart, so you can see
 which services emit structured JSON vs plain text — useful when you later parse them.
 
-## What you just proved
+## Two pillars down, still no OTel
 
 Two pillars down, **zero** OpenTelemetry. Metrics: the app exposed `/metrics`, Prometheus
 pulled. Logs: the app wrote stdout, Promtail tailed. In both cases the collector lives outside

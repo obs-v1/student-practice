@@ -6,9 +6,9 @@
 #     -f ../student-bootcamp/ec2-k8s/values-kind.yaml \
 #     -f values-no-obs.yaml
 #
-# This is the starting line of the lab: 75 services running, emitting nothing, scraped by
-# nothing. `make app` deploys this and then darkens every pod (OTEL_SDK_DISABLED=true,
-# prometheus.io/scrape=false) so you truly begin from zero and add each pillar by hand.
+# This is the starting line of the lab: 75 services running, emitting nothing, collected by
+# nothing. `make app` deploys this and turns the telemetry SDK off (OTEL_SDK_DISABLED=true),
+# so you begin from zero and add each pillar by hand.
 global:
   # dark = the SDK is loaded but exports nothing. The app runs identically; it just stays
   # silent until YOU point a backend at it in the later sections.
