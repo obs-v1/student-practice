@@ -5,6 +5,8 @@
 # sudo (ec2-user / ubuntu). Idempotent — safe to re-run.
 set -euo pipefail
 
+labauto k9s
+
 export PATH="/usr/local/bin:$PATH"
 KIND_VERSION="v0.32.0"
 ARCH="$(uname -m)"
