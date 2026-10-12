@@ -10,6 +10,11 @@ loki:
   enabled: true
   fullnameOverride: loki        # service is "loki" on :3100 — what Grafana's datasource and
                                 # `make verify-logs` expect
+  # loki-stack pins an OLD Loki (2.6.1). Grafana 11's datasource "Save & test" sends a
+  # `vector(1)` query, which only exists in Loki >= 2.8 — on 2.6 it fails with
+  # "parse error ... unexpected IDENTIFIER". Pin a newer Loki so the health check passes.
+  image:
+    tag: 2.9.8
   persistence:
     enabled: false              # lab sizing: filesystem storage, no PVC
   service:
