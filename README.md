@@ -81,7 +81,7 @@ main.tf    provision an EC2 box + empty kind cluster (make tf-apply), no app
 cluster/   STEP 0 — make Kubernetes available (kind on a VM): tools, kind-config, expose
 docs/      00..05  the teaching spine (read these)
 metrics/   Prometheus — Helm values (chart: prometheus-community/prometheus)
-logs/      Loki + Promtail: store, RBAC, config, DaemonSet (manifests)
+logs/      Loki + Promtail — Helm values (chart: grafana/loki-stack)
 traces/    Jaeger all-in-one with native OTLP (manifest)
 correlation/ Grafana — Helm values: datasources + trace<->logs + overview dashboard
 app/       values-no-obs.yaml — the "observability OFF" overlay

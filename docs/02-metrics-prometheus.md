@@ -70,7 +70,9 @@ make app          # helm upgrade — rolls upi-service with the annotation
 instead: `kubectl -n bankobs patch deploy upi-service --type=merge -p
 '{"spec":{"template":{"metadata":{"annotations":{"prometheus.io/scrape":"true","prometheus.io/path":"/metrics","prometheus.io/port":"8011"}}}}}'`.)
 
-Do it for a few services, or all of them — each one you opt in shows up in Prometheus.
+Do it for a few services, or all of them — each one you opt in shows up in Prometheus. To
+opt in **every** service at once (uncomments the annotation in all the charts), there's a
+shortcut: `make enable-annotations-to-deploy` then `make app` (and `make disable-annotations-to-deploy` reverses it).
 
 ## Check Prometheus
 

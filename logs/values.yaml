@@ -1,0 +1,32 @@
+# Helm values for logs (chart: grafana/loki-stack) — installs Loki AND Promtail from ONE
+# chart. Promtail runs as a DaemonSet, tails every pod's stdout off the node, and ships it to
+# Loki. The app does nothing — it just writes to stdout. Replaces the hand-written
+# loki/promtail manifests; installed with one `helm upgrade -i`.
+#
+# The Grafana + Prometheus sub-charts that loki-stack bundles are turned OFF — this lab brings
+# its own (Prometheus in Section 2, Grafana in the correlation module).
+
+loki:
+  enabled: true
+  fullnameOverride: loki        # service is "loki" on :3100 — what Grafana's datasource and
+                                # `make verify-logs` expect
+  persistence:
+    enabled: false              # lab sizing: filesystem storage, no PVC
+  service:
+    type: NodePort
+    port: 3100
+    nodePort: 30310             # kind maps host :3100 -> this nodePort (cluster/kind-config.yaml)
+
+promtail:
+  enabled: true
+  config:
+    # ship to the Loki service above
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+
+# Not needed — this lab has its own.
+grafana:    { enabled: false }
+prometheus: { enabled: false }
+filebeat:   { enabled: false }
+fluent-bit: { enabled: false }
+logstash:   { enabled: false }

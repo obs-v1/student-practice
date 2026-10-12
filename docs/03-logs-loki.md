@@ -29,35 +29,27 @@ Nothing here is OpenTelemetry, and the app is a bystander.
 
 ## Setting it up
 
-**1. Let Promtail discover pods** (same service-discovery idea as Prometheus, so it can label
-each log line with its pod):
+Loki and Promtail both come from one Helm chart — **`grafana/loki-stack`** installs the store
+(Loki) *and* the agent (Promtail) together, so this is a single command. Promtail is a
+DaemonSet (one pod per node, mounting `/var/log`); Loki is a StatefulSet. Our
+[`logs/values.yaml`](../logs/values.yaml) keeps it lab-sized (filesystem storage, no PVC),
+turns off the Grafana/Prometheus sub-charts the chart bundles (this lab has its own), and
+exposes Loki's API as a **NodePort** (`3100` → `30310`, mapped to the host by
+`cluster/kind-config.yaml`).
+
 ```bash
-kubectl apply -f logs/promtail-rbac.yaml
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update grafana
+
+helm upgrade --install loki grafana/loki-stack \
+  -n monitoring --create-namespace -f logs/values.yaml
+
+kubectl -n monitoring rollout status statefulset/loki
 ```
 
-**2. Loki — the store:**
-```bash
-kubectl apply -f logs/loki.yaml
-kubectl -n monitoring rollout status deploy/loki --timeout=120s
-```
-
-**3. Promtail's config** — the log equivalent of a scrape config. Open
-[`logs/promtail-config.yaml`](../logs/promtail-config.yaml): it keeps only the `bankobs`
-namespace, attaches `namespace` / `app` / `domain` / `pod` / `log_format` labels, and points
-`clients.url` at Loki's push endpoint.
-```bash
-kubectl apply -f logs/promtail-config.yaml
-```
-
-**4. Promtail — one pod per node** (a DaemonSet, because log files live on the node's disk;
-it mounts `/var/log` read-only):
-```bash
-kubectl apply -f logs/promtail.yaml
-kubectl -n monitoring rollout status daemonset/promtail --timeout=120s
-```
-
-Notice step 2–4 touched **only** the backends. There was no "configure the app" step like
-metrics had — because logs require nothing from the app at all.
+That's it — **no "configure the app" step** like metrics had. Promtail finds every pod on the
+node, tails its container log file, attaches labels (`namespace`, `app`, `pod`, `container`,
+…), and pushes to Loki. The app never knew.
 
 ## Check Loki
 
@@ -68,22 +60,21 @@ make traffic            # ~60s of portal journeys
 make verify-logs        # prints which app services are landing in Loki
 ```
 
-Loki has no UI of its own. Two ways to read it:
-- **API** (what `verify-logs` uses):
-  ```bash
-  kubectl -n monitoring port-forward svc/loki 3100:3100 &
-  # which services are reporting?
-  curl -s 'http://localhost:3100/loki/api/v1/label/app/values' | jq
-  # last 5 min of one service's logs:
-  curl -s --get 'http://localhost:3100/loki/api/v1/query_range' \
-    --data-urlencode 'query={app="upi-service"}' | jq '.data.result[].values[][1]' | head
-  ```
-- **Grafana Explore** — the usual way you'd *view* logs in production. The optional
-  [`correlation/`](../correlation/README.md) module (`make correlation`) stands up Grafana with
-  Loki as a datasource and even links each log line's `trace_id` straight to Jaeger.
+Loki has no UI of its own — reach its HTTP API on the NodePort (`make urls` → Loki API,
+`http://<box>:3100`) or via a port-forward:
+```bash
+# which services are reporting?
+curl -s 'http://<box>:3100/loki/api/v1/label/app/values' | jq
 
-The `log_format` label (`json` or `raw`) is carried through from the chart, so you can see
-which services emit structured JSON vs plain text — useful when you later parse them.
+# last few lines of one service:
+curl -s --get 'http://<box>:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={namespace="bankobs", app="upi-service"}' \
+  | jq '.data.result[].values[][1]' | head
+```
+
+To actually *view* logs you'd point Grafana at Loki — the optional
+[`correlation/`](../correlation/README.md) module (`make correlation`) does exactly that, and
+links each log line's `trace_id` straight to the trace in Jaeger.
 
 ## Two pillars down, still no OTel
 

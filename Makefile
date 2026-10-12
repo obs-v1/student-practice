@@ -43,7 +43,7 @@ STEP    := @scripts/step.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help tf-install tf-apply tf-destroy kubeconfig kube-check \
-        cluster app darken metrics logs traces all correlation traffic \
+        cluster app darken metrics enable-annotations-to-deploy disable-annotations-to-deploy logs traces all correlation traffic \
         verify verify-metrics verify-logs verify-traces urls clean
 
 help: ## Show this help
@@ -129,25 +129,32 @@ metrics: ## 2. Prometheus (Helm) scrapes /metrics directly (no OTel)
 	$(STEP) "Install Prometheus (server only) — brings its own RBAC + scrape config (metrics/values.yaml)" \
 	        "helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=180s"
 	@echo ""
-	@echo "  ✓ Prometheus is pulling the app's /metrics (the bankobs pods already carry the"
-	@echo "    prometheus.io/scrape annotation). Give it ~30s, then: make verify-metrics"
+	@echo "  ✓ Prometheus is up — but scraping NOTHING from bankobs yet: no service has the"
+	@echo "    prometheus.io/scrape annotation. Opt one in (docs/02), or 'make enable-annotations-to-deploy'."
 	@$(MAKE) -s _url HP=9090 NAME=Prometheus
+
+enable-annotations-to-deploy: ## Opt EVERY service into scraping (uncomment the annotation in all charts)
+	$(STEP) "Uncomment the prometheus.io/scrape annotation in every service's deployment.yaml" \
+	        "bash scripts/scrape-annotations.sh on"
+	@echo "  ✓ now apply it:  make app   (helm upgrade rolls the services with the annotation)"
+
+disable-annotations-to-deploy: ## Reverse of enable-annotations-to-deploy: re-comment the annotation in all service charts
+	$(STEP) "Re-comment the prometheus.io/scrape annotation in every service's deployment.yaml" \
+	        "bash scripts/scrape-annotations.sh off"
+	@echo "  ✓ now apply it:  make app"
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 3 — LOGS (Loki + Promtail), no OTel
 # ───────────────────────────────────────────────────────────────────────────────
-logs: ## 3. Loki + Promtail tail container stdout (no OTel)
+logs: ## 3. Loki + Promtail (Helm) tail container stdout (no OTel)
 	$(SECTION) "3" "Logs with Loki + Promtail" "Promtail tails the node's container logs and pushes to Loki. The app writes stdout — nothing else."
-	$(STEP) "Grant Promtail read-only access to the Kubernetes API" \
-	        "kubectl apply -f logs/promtail-rbac.yaml"
-	$(STEP) "Deploy Loki (the log store) and wait for it" \
-	        "kubectl apply -f logs/loki.yaml && kubectl -n $(OBS_NS) rollout status deploy/loki --timeout=120s"
-	$(STEP) "Install Promtail's config — what to tail, which labels to attach, where to push" \
-	        "kubectl apply -f logs/promtail-config.yaml"
-	$(STEP) "Deploy Promtail (one pod per node) and wait for it" \
-	        "kubectl apply -f logs/promtail.yaml && kubectl -n $(OBS_NS) rollout status daemonset/promtail --timeout=120s"
+	$(STEP) "Add the Grafana Helm repo" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
+	$(STEP) "Install Loki + Promtail from one chart (loki-stack) — see logs/values.yaml" \
+	        "helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f logs/values.yaml && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=180s"
 	@echo ""
-	@echo "  ✓ Logs are flowing to Loki (no app change was needed). Then: make verify-logs"
+	@echo "  ✓ Loki + Promtail up; logs are flowing (no app change was needed). Then: make verify-logs"
+	@$(MAKE) -s _url HP=3100 NAME=Loki
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 4 — TRACES (Jaeger) — the pillar that still needs in-app OTel
@@ -215,7 +222,7 @@ urls: ## Print the UI URLs
 	@$(MAKE) -s _url HP=9090  NAME=Prometheus
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 	@$(MAKE) -s _url HP=3000  NAME=Grafana
-	@echo "  Loki      (no UI): kubectl -n $(OBS_NS) port-forward svc/loki 3100:3100  ->  http://localhost:3100"
+	@$(MAKE) -s _url HP=3100  NAME="Loki API"
 
 # Print a UI URL. The services are NodePorts (30909/30686), but kind REMAPS those to
 # host ports 9090/16686 (see cluster/kind-config.yaml) — so the reachable address is the
@@ -228,8 +235,8 @@ _url:
 	 printf "  %-10s http://%s:%s\n" "$(NAME)" "$$IP" "$(HP)"
 
 clean: ## Remove the backends (leaves the app running)
-	$(STEP) "Uninstall the Helm releases (Prometheus, Grafana) incl. their cluster RBAC" \
-	        "helm -n $(OBS_NS) uninstall prometheus grafana 2>/dev/null || true"
+	$(STEP) "Uninstall the Helm releases (Prometheus, Loki+Promtail, Grafana) incl. their cluster RBAC" \
+	        "helm -n $(OBS_NS) uninstall prometheus loki grafana 2>/dev/null || true"
 	$(STEP) "Delete the monitoring namespace (Loki, Promtail, Jaeger, + anything left)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
