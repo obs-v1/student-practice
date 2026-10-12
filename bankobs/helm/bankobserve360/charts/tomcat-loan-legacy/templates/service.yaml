@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat-loan-legacy
+  labels: { app: tomcat-loan-legacy, domain: legacy-stack }
+spec:
+  selector: { app: tomcat-loan-legacy }
+  ports:
+    - name: http
+      port: 8071
+      targetPort: 8071

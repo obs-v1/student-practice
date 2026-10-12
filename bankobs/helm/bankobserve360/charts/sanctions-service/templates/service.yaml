@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sanctions-service
+  labels: { app: sanctions-service, domain: fraud-risk }
+spec:
+  selector: { app: sanctions-service }
+  ports:
+    - name: http
+      port: 8043
+      targetPort: 8043

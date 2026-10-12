@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rbi-reporter
+  labels: { app: rbi-reporter, domain: audit-compliance }
+spec:
+  selector: { app: rbi-reporter }
+  ports:
+    - name: http
+      port: 8061
+      targetPort: 8061

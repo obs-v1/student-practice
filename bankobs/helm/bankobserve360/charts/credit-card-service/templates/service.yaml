@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: credit-card-service
+  labels: { app: credit-card-service, domain: retail-banking }
+spec:
+  selector: { app: credit-card-service }
+  ports:
+    - name: http
+      port: 8024
+      targetPort: 8024

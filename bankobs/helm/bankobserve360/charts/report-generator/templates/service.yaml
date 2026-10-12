@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: report-generator
+  labels: { app: report-generator, domain: audit-compliance }
+spec:
+  selector: { app: report-generator }
+  ports:
+    - name: http
+      port: 8065
+      targetPort: 8065

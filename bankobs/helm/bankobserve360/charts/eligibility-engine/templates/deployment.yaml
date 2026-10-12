@@ -1,0 +1,51 @@
+# eligibility-engine — bankobs service (part of the "retail-banking" domain).
+#
+# Deployed WITHOUT a prometheus.io/scrape annotation on purpose. Nothing scrapes this
+# service until YOU opt it in. To bring it under monitoring, uncomment the annotations
+# block below (Prometheus's scrape config keeps only pods with prometheus.io/scrape=true).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eligibility-engine
+  labels:
+    app: eligibility-engine
+    domain: retail-banking
+    log_format: json
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: eligibility-engine } }
+  template:
+    metadata:
+      labels:
+        app: eligibility-engine
+        domain: retail-banking
+        log_format: json
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "8028"
+    spec:
+      containers:
+        - name: eligibility-engine
+          image: "{{ .Values.global.registry }}/eligibility-engine:{{ .Values.global.imageTag }}"
+          ports:
+            - containerPort: 8028
+          env:
+            - name: SERVICE_NAME
+              value: eligibility-engine
+            - name: SERVICE_PORT
+              value: "8028"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: OBSERVABILITY_MODE
+              value: full
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8028 }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8028 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }

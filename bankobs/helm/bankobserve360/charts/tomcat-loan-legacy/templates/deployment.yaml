@@ -1,0 +1,51 @@
+# tomcat-loan-legacy — bankobs service (part of the "legacy-stack" domain).
+#
+# Deployed WITHOUT a prometheus.io/scrape annotation on purpose. Nothing scrapes this
+# service until YOU opt it in. To bring it under monitoring, uncomment the annotations
+# block below (Prometheus's scrape config keeps only pods with prometheus.io/scrape=true).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomcat-loan-legacy
+  labels:
+    app: tomcat-loan-legacy
+    domain: legacy-stack
+    log_format: raw
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: tomcat-loan-legacy } }
+  template:
+    metadata:
+      labels:
+        app: tomcat-loan-legacy
+        domain: legacy-stack
+        log_format: raw
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "8071"
+    spec:
+      containers:
+        - name: tomcat-loan-legacy
+          image: "{{ .Values.global.registry }}/tomcat-loan-legacy:{{ .Values.global.imageTag }}"
+          ports:
+            - containerPort: 8071
+          env:
+            - name: SERVICE_NAME
+              value: tomcat-loan-legacy
+            - name: SERVICE_PORT
+              value: "8071"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: OBSERVABILITY_MODE
+              value: full
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8071 }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8071 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }

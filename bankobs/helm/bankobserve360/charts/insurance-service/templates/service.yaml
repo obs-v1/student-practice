@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: insurance-service
+  labels: { app: insurance-service, domain: retail-banking }
+spec:
+  selector: { app: insurance-service }
+  ports:
+    - name: http
+      port: 8025
+      targetPort: 8025

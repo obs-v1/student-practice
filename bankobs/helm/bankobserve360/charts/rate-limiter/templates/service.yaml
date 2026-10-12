@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rate-limiter
+  labels: { app: rate-limiter, domain: core-banking }
+spec:
+  selector: { app: rate-limiter }
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082

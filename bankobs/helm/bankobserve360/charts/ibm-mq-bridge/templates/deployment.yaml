@@ -1,0 +1,51 @@
+# ibm-mq-bridge — bankobs service (part of the "legacy-stack" domain).
+#
+# Deployed WITHOUT a prometheus.io/scrape annotation on purpose. Nothing scrapes this
+# service until YOU opt it in. To bring it under monitoring, uncomment the annotations
+# block below (Prometheus's scrape config keeps only pods with prometheus.io/scrape=true).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ibm-mq-bridge
+  labels:
+    app: ibm-mq-bridge
+    domain: legacy-stack
+    log_format: raw
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ibm-mq-bridge } }
+  template:
+    metadata:
+      labels:
+        app: ibm-mq-bridge
+        domain: legacy-stack
+        log_format: raw
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "8072"
+    spec:
+      containers:
+        - name: ibm-mq-bridge
+          image: "{{ .Values.global.registry }}/ibm-mq-bridge:{{ .Values.global.imageTag }}"
+          ports:
+            - containerPort: 8072
+          env:
+            - name: SERVICE_NAME
+              value: ibm-mq-bridge
+            - name: SERVICE_PORT
+              value: "8072"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: OBSERVABILITY_MODE
+              value: full
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8072 }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8072 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }

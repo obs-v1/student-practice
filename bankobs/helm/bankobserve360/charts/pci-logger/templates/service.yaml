@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pci-logger
+  labels: { app: pci-logger, domain: audit-compliance }
+spec:
+  selector: { app: pci-logger }
+  ports:
+    - name: http
+      port: 8062
+      targetPort: 8062

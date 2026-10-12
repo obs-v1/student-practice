@@ -1,0 +1,91 @@
+{{- $fi := .Values.faultInjector }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fault-injector
+  labels:
+    app: fault-injector
+    domain: fault-injector
+    log_format: {{ $fi.logFormat | default "json" }}
+  annotations:
+    # Installed with the platform but dormant. Scale up when you want to break
+    # something:  kubectl -n {{ .Release.Namespace }} scale deploy/fault-injector --replicas=1
+    bankobs.io/dormant: "true"
+spec:
+  replicas: {{ $fi.replicas | default 0 }}
+  # The injector holds all fault state in memory; two of them would fight over
+  # the same workloads and each would only know half the blast radius.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: fault-injector } }
+  template:
+    metadata:
+      labels:
+        app: fault-injector
+        domain: fault-injector
+        # Loki/promtail picks its parser from this: json | raw.
+        log_format: {{ $fi.logFormat | default "json" }}
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "{{ $fi.metricsPort }}"
+    spec:
+      serviceAccountName: {{ $fi.serviceAccount.name }}
+      containers:
+        - name: fault-injector
+          image: {{ include "fault-injector.image" . | quote }}
+          imagePullPolicy: {{ .Values.global.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - { name: http,    containerPort: {{ $fi.port }} }
+            - { name: metrics, containerPort: {{ $fi.metricsPort }} }
+          env:
+            - name: SERVICE_NAME
+              value: fault-injector
+            - name: SERVICE_PORT
+              value: {{ $fi.port | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: fault-injector
+            - name: OTEL_SERVICE_NAMESPACE
+              value: fault-injector
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.global.otel.endpoint | default "http://otel-collector:4317" }}
+            - name: OBSERVABILITY_MODE
+              value: {{ .Values.global.observability.mode | default "full" | quote }}
+            - name: DEPLOYMENT_ENV
+              value: training
+            - name: SERVICE_VERSION
+              value: {{ .Values.global.imageTag | quote }}
+            - name: LOG_LEVEL
+              value: INFO
+            # In-cluster: faults are enforced through the Kubernetes API, not
+            # a Docker socket. Empty FAULT_PLATFORM auto-detects.
+            - name: FAULT_PLATFORM
+              value: {{ $fi.platform | quote }}
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: FAULT_ALLOW_OBSERVABILITY
+              value: {{ $fi.allowObservability | quote }}
+          livenessProbe:
+            httpGet: { path: /health/live, port: {{ $fi.port }} }
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: {{ $fi.port }} }
+            initialDelaySeconds: 5
+          resources:
+{{ toYaml $fi.resources | indent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      {{- with $fi.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $fi.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $fi.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}

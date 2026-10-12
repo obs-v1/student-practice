@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: branch-service
+  labels: { app: branch-service, domain: core-banking }
+spec:
+  selector: { app: branch-service }
+  ports:
+    - name: http
+      port: 8007
+      targetPort: 8007

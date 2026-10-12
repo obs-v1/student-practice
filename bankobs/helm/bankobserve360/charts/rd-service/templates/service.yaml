@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rd-service
+  labels: { app: rd-service, domain: retail-banking }
+spec:
+  selector: { app: rd-service }
+  ports:
+    - name: http
+      port: 8023
+      targetPort: 8023

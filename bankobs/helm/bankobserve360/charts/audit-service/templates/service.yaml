@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  labels: { app: audit-service, domain: audit-compliance }
+spec:
+  selector: { app: audit-service }
+  ports:
+    - name: http
+      port: 8060
+      targetPort: 8060

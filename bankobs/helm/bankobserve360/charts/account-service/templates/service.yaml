@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+  labels: { app: account-service, domain: core-banking }
+spec:
+  selector: { app: account-service }
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001

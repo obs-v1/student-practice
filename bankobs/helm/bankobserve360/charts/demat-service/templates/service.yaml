@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: demat-service
+  labels: { app: demat-service, domain: retail-banking }
+spec:
+  selector: { app: demat-service }
+  ports:
+    - name: http
+      port: 8026
+      targetPort: 8026

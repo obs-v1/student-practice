@@ -1,0 +1,54 @@
+{{- $fi := .Values.faultInjector }}
+{{- if $fi.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fi.serviceAccount.name }}
+  labels: { app: fault-injector, domain: fault-injector }
+---
+{{- end }}
+{{- if $fi.rbac.create }}
+# Namespace-scoped by design: the injector can only break workloads in its own
+# release namespace, never cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fault-injector
+  labels: { app: fault-injector, domain: fault-injector }
+rules:
+  # container_stop / container_pause → scale to 0; revert → scale back
+  # cpu_throttle / mem_limit         → patch container limits
+  # container_restart                → restartedAt annotation
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "patch", "update"]
+  # container_kill → delete a pod and let the ReplicaSet replace it
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  # network_partition → deny-all NetworkPolicy, removed on revert
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "delete"]
+  # readiness probe checks it can still reach the API
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fault-injector
+  labels: { app: fault-injector, domain: fault-injector }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fault-injector
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fi.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

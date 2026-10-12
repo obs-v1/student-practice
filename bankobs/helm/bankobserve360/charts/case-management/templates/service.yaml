@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: case-management
+  labels: { app: case-management, domain: fraud-risk }
+spec:
+  selector: { app: case-management }
+  ports:
+    - name: http
+      port: 8045
+      targetPort: 8045

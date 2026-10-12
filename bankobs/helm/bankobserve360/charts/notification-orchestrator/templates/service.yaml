@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-orchestrator
+  labels: { app: notification-orchestrator, domain: notifications }
+spec:
+  selector: { app: notification-orchestrator }
+  ports:
+    - name: http
+      port: 8050
+      targetPort: 8050

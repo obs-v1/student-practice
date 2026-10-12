@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: compliance-checker
+  labels: { app: compliance-checker, domain: audit-compliance }
+spec:
+  selector: { app: compliance-checker }
+  ports:
+    - name: http
+      port: 8064
+      targetPort: 8064

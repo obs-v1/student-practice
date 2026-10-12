@@ -1,0 +1,11 @@
+{{- $fi := .Values.faultInjector }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: fault-injector
+  labels: { app: fault-injector, domain: fault-injector }
+spec:
+  selector: { app: fault-injector }
+  ports:
+    - { name: http,    port: {{ $fi.port }},        targetPort: {{ $fi.port }} }
+    - { name: metrics, port: {{ $fi.metricsPort }}, targetPort: {{ $fi.metricsPort }} }

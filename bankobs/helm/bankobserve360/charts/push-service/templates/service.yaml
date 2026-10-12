@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: push-service
+  labels: { app: push-service, domain: notifications }
+spec:
+  selector: { app: push-service }
+  ports:
+    - name: http
+      port: 8053
+      targetPort: 8053

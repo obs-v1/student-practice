@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wealth-service
+  labels: { app: wealth-service, domain: retail-banking }
+spec:
+  selector: { app: wealth-service }
+  ports:
+    - name: http
+      port: 8027
+      targetPort: 8027

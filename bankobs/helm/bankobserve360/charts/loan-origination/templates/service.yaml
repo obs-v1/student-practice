@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: loan-origination
+  labels: { app: loan-origination, domain: retail-banking }
+spec:
+  selector: { app: loan-origination }
+  ports:
+    - name: http
+      port: 8021
+      targetPort: 8021

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-scoring
+  labels: { app: risk-scoring, domain: fraud-risk }
+spec:
+  selector: { app: risk-scoring }
+  ports:
+    - name: http
+      port: 8044
+      targetPort: 8044

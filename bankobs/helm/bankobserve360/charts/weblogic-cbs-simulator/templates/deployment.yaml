@@ -1,0 +1,51 @@
+# weblogic-cbs-simulator — bankobs service (part of the "legacy-stack" domain).
+#
+# Deployed WITHOUT a prometheus.io/scrape annotation on purpose. Nothing scrapes this
+# service until YOU opt it in. To bring it under monitoring, uncomment the annotations
+# block below (Prometheus's scrape config keeps only pods with prometheus.io/scrape=true).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weblogic-cbs-simulator
+  labels:
+    app: weblogic-cbs-simulator
+    domain: legacy-stack
+    log_format: raw
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: weblogic-cbs-simulator } }
+  template:
+    metadata:
+      labels:
+        app: weblogic-cbs-simulator
+        domain: legacy-stack
+        log_format: raw
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "8070"
+    spec:
+      containers:
+        - name: weblogic-cbs-simulator
+          image: "{{ .Values.global.registry }}/weblogic-cbs-simulator:{{ .Values.global.imageTag }}"
+          ports:
+            - containerPort: 8070
+          env:
+            - name: SERVICE_NAME
+              value: weblogic-cbs-simulator
+            - name: SERVICE_PORT
+              value: "8070"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: OBSERVABILITY_MODE
+              value: full
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8070 }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8070 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pan-adapter
+  labels: { app: pan-adapter, domain: customer-identity }
+spec:
+  selector: { app: pan-adapter }
+  ports:
+    - name: http
+      port: 8033
+      targetPort: 8033

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: weblogic-cbs-simulator
+  labels: { app: weblogic-cbs-simulator, domain: legacy-stack }
+spec:
+  selector: { app: weblogic-cbs-simulator }
+  ports:
+    - name: http
+      port: 8070
+      targetPort: 8070

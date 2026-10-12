@@ -1,0 +1,51 @@
+# imps-service — bankobs service (part of the "payments" domain).
+#
+# Deployed WITHOUT a prometheus.io/scrape annotation on purpose. Nothing scrapes this
+# service until YOU opt it in. To bring it under monitoring, uncomment the annotations
+# block below (Prometheus's scrape config keeps only pods with prometheus.io/scrape=true).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imps-service
+  labels:
+    app: imps-service
+    domain: payments
+    log_format: json
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: imps-service } }
+  template:
+    metadata:
+      labels:
+        app: imps-service
+        domain: payments
+        log_format: json
+      # ─── opt this service INTO monitoring: uncomment these three lines ───
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/path:   "/metrics"
+      #   prometheus.io/port:   "8014"
+    spec:
+      containers:
+        - name: imps-service
+          image: "{{ .Values.global.registry }}/imps-service:{{ .Values.global.imageTag }}"
+          ports:
+            - containerPort: 8014
+          env:
+            - name: SERVICE_NAME
+              value: imps-service
+            - name: SERVICE_PORT
+              value: "8014"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: OBSERVABILITY_MODE
+              value: full
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8014 }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8014 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }

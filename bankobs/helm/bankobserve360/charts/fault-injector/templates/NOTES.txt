@@ -1,0 +1,22 @@
+fault-injector is installed and DORMANT (replicas: {{ .Values.faultInjector.replicas }}).
+
+Nothing is being broken. To arm it:
+
+  kubectl -n {{ .Release.Namespace }} scale deploy/fault-injector --replicas=1
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/fault-injector
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/fault-injector 8091:{{ .Values.faultInjector.port }}
+  curl localhost:8091/api/v1/scenarios
+
+To disarm — this reverts every active fault first, because the injector heals
+everything it did on shutdown:
+
+  curl -X DELETE localhost:8091/api/v1/faults
+  kubectl -n {{ .Release.Namespace }} scale deploy/fault-injector --replicas=0
+
+On Kubernetes the enforcement differs from local Docker:
+  container_stop / container_pause  → scale the workload to 0 (revert: scale back)
+  container_kill                    → delete a pod; the ReplicaSet replaces it
+  cpu_throttle / mem_limit          → patch container limits (this rolls the pods)
+  network_partition                 → deny-all NetworkPolicy (needs an enforcing CNI)
+  network_delay / network_loss      → NOT available; use the app plane instead

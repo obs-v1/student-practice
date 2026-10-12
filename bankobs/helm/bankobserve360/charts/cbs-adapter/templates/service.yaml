@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbs-adapter
+  labels: { app: cbs-adapter, domain: core-banking }
+spec:
+  selector: { app: cbs-adapter }
+  ports:
+    - name: http
+      port: 8008
+      targetPort: 8008
