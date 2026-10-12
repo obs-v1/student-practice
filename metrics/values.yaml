@@ -24,36 +24,59 @@ server:
 # and scrapes only those in the bankobs namespace that carry prometheus.io/scrape=true, using
 # their prometheus.io/path + prometheus.io/port. The relabels also set app/namespace/pod so the
 # dashboard can group by service.
-serverFiles:
-  prometheus.yml:
-    scrape_configs:
-      - job_name: prometheus
-        static_configs:
-          - targets: ["localhost:9090"]
-      - job_name: bankobs-pods
-        kubernetes_sd_configs:
-          - role: pod
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_namespace]
-            action: keep
-            regex: bankobs
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-            action: keep
-            regex: "true"
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-            action: replace
-            target_label: __metrics_path__
-            regex: (.+)
-          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-            action: replace
-            target_label: __address__
-            regex: ([^:]+)(?::\d+)?;(\d+)
-            replacement: $1:$2
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            target_label: app
-          - source_labels: [__meta_kubernetes_pod_label_domain]
-            target_label: domain
-          - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod
+#
+# NOTE on where this goes. Chart 29.x keeps its own default jobs in `scrapeConfigs` — a MAP
+# keyed by job name — and the server ConfigMap template APPENDS
+# serverFiles."prometheus.yml".scrape_configs to them (templates/cm.yaml). A list there does
+# not replace the defaults, so a self-scrape job called `prometheus` collides with the chart's
+# own and Prometheus refuses to start:
+#     found multiple scrape configs with job name "prometheus"
+# Declaring jobs in the map avoids that by construction: the key IS the job name, so a
+# collision overrides instead of duplicating.
+scrapeConfigs:
+  # The chart's own self-scrape. Kept — this is the one that used to be declared twice.
+  prometheus:
+    enabled: true
+
+  # This lab's pull model: annotation-based discovery, scoped to the bankobs namespace.
+  bankobs-pods:
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace]
+        action: keep
+        regex: bankobs
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_label_domain]
+        target_label: domain
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+
+  # Off for this lab. kubernetes-pods does the same annotation discovery cluster-wide, so
+  # leaving it on scrapes every bankobs pod a SECOND time under a different job name —
+  # duplicate series for the same target. The rest are cluster-infra jobs this lab does not
+  # use, and prometheus-pushgateway has no backend since the subchart is disabled above.
+  kubernetes-api-servers:            { enabled: false }
+  kubernetes-nodes:                  { enabled: false }
+  kubernetes-nodes-cadvisor:         { enabled: false }
+  kubernetes-pods:                   { enabled: false }
+  kubernetes-pods-slow:              { enabled: false }
+  kubernetes-service-endpoints:      { enabled: false }
+  kubernetes-service-endpoints-slow: { enabled: false }
+  kubernetes-services:               { enabled: false }
+  prometheus-pushgateway:            { enabled: false }
