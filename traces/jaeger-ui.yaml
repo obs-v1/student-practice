@@ -1,0 +1,17 @@
+# The Jaeger chart's all-in-one UI service is headless, so it can't be a NodePort. This small
+# Service fronts the same all-in-one pod and exposes the query UI (16686) as a NodePort, so the
+# UI is reachable on the host (kind maps host :16686 -> nodePort 30686). Named "jaeger" so the
+# Grafana datasource (http://jaeger:16686), `make verify-traces` and `make urls` all just work.
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels: { app: jaeger }
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/instance: jaeger
+    app.kubernetes.io/component: all-in-one
+  ports:
+    - { name: ui, port: 16686, targetPort: 16686, nodePort: 30686 }

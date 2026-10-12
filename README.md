@@ -82,7 +82,7 @@ cluster/   STEP 0 — make Kubernetes available (kind on a VM): tools, kind-conf
 docs/      00..05  the teaching spine (read these)
 metrics/   Prometheus — Helm values (chart: prometheus-community/prometheus)
 logs/      Loki + Promtail — Helm values (chart: grafana/loki-stack)
-traces/    Jaeger all-in-one with native OTLP (manifest)
+traces/    Jaeger — Helm values (chart: jaegertracing/jaeger) + UI NodePort service
 correlation/ Grafana — Helm values: datasources + trace<->logs + overview dashboard
 app/       values-no-obs.yaml — the "observability OFF" overlay
 scripts/   step.sh / section.sh — the narration helpers the Makefile uses

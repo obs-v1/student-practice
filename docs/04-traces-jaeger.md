@@ -32,11 +32,18 @@ instrumentation. Full stop.
 Two honest layers:
 
 **Layer 1 — no Collector (we do this).** Jaeger can receive OTLP *natively*, so we drop the
-OTel **Collector** and let the app send traces **straight to Jaeger**. Deploy Jaeger, then
-turn the SDK back on (the switch you flipped off in Section 1) and point it at Jaeger:
+OTel **Collector** and let the app send traces **straight to Jaeger**. Install Jaeger
+all-in-one from its Helm chart ([`traces/values.yaml`](../traces/values.yaml); the all-in-one
+UI service is headless, so a small [`traces/jaeger-ui.yaml`](../traces/jaeger-ui.yaml) fronts
+it as a NodePort). Then turn the SDK back on (the switch you flipped off in Section 1) and
+point it at Jaeger's collector:
 
 ```bash
-kubectl apply -f traces/jaeger.yaml
+helm repo add jaegertracing https://jaegertracing.github.io/helm-charts
+helm repo update jaegertracing
+helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 \
+  -n monitoring --create-namespace -f traces/values.yaml
+kubectl apply -f traces/jaeger-ui.yaml        # UI on a NodePort (16686 -> host :16686)
 
 kubectl -n bankobs set env deployment -l domain \
   OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true \

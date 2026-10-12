@@ -161,13 +161,18 @@ logs: ## 3. Loki + Promtail (Helm) tail container stdout (no OTel)
 # ───────────────────────────────────────────────────────────────────────────────
 traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	$(SECTION) "4" "Traces with Jaeger" "Point the app's OTLP straight at Jaeger — no Collector. But note WHY the app can speak OTLP at all (docs/04)."
-	$(STEP) "Deploy Jaeger all-in-one with its native OTLP receiver, and wait" \
-	        "kubectl apply -f traces/jaeger.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=120s"
+	$(STEP) "Add the Jaeger Helm repo" \
+	        "helm repo add jaegertracing https://jaegertracing.github.io/helm-charts && helm repo update jaegertracing"
+	$(STEP) "Install Jaeger all-in-one (native OTLP, in-memory) — see traces/values.yaml" \
+	        "helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=180s"
+	$(STEP) "Expose the Jaeger UI on a NodePort (the chart's UI service is headless)" \
+	        "kubectl apply -f traces/jaeger-ui.yaml"
 	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP)"
 	@echo ""
-	@echo "  ✓ Traces are going app → Jaeger directly. Generate traffic, then: make verify-traces"
+	@echo "  ✓ Traces are going app → Jaeger directly (jaeger-collector:4317). Generate traffic, then: make verify-traces"
 	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
+	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
 all: app metrics logs traces ## 1→4 in order (the full by-hand build)
 	@echo ""
@@ -235,8 +240,8 @@ _url:
 	 printf "  %-10s http://%s:%s\n" "$(NAME)" "$$IP" "$(HP)"
 
 clean: ## Remove the backends (leaves the app running)
-	$(STEP) "Uninstall the Helm releases (Prometheus, Loki+Promtail, Grafana) incl. their cluster RBAC" \
-	        "helm -n $(OBS_NS) uninstall prometheus loki grafana 2>/dev/null || true"
+	$(STEP) "Uninstall the Helm releases (Prometheus, Loki+Promtail, Jaeger, Grafana) incl. cluster RBAC" \
+	        "helm -n $(OBS_NS) uninstall prometheus loki jaeger grafana 2>/dev/null || true"
 	$(STEP) "Delete the monitoring namespace (Loki, Promtail, Jaeger, + anything left)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \

@@ -1,0 +1,27 @@
+# Helm values for Jaeger (chart: jaegertracing/jaeger, v1 line) — ALL-IN-ONE, in-memory.
+# Replaces the hand-written traces/jaeger.yaml. One pod: collector + query + UI + storage
+# fused, with the native OTLP receiver on 4317/4318 so the app sends traces straight here
+# (no OTel Collector). Installed with one `helm upgrade -i`.
+#
+# fullnameOverride keeps the service names predictable: jaeger-collector (OTLP, where the app
+# exports) and jaeger-query (the UI).
+fullnameOverride: jaeger
+
+# No external datastore — all-in-one keeps traces in memory (lab sizing; lost on restart).
+provisionDataStore:
+  cassandra: false
+  elasticsearch: false
+storage:
+  type: memory
+
+# The separate production components are off — all-in-one does it all.
+agent:     { enabled: false }
+collector: { enabled: false }
+query:     { enabled: false }
+
+allInOne:
+  enabled: true
+  # turn on the native OTLP receivers (4317 gRPC / 4318 HTTP)
+  extraEnv:
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
