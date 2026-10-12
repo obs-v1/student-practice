@@ -6,6 +6,9 @@
 set -euo pipefail
 
 labauto k9s
+labauto terraform
+labauto kubens
+
 
 export PATH="/usr/local/bin:$PATH"
 KIND_VERSION="v0.32.0"

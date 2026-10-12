@@ -43,7 +43,7 @@ STEP    := @scripts/step.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help tf-install tf-apply tf-destroy kubeconfig kube-check \
-        cluster app darken metrics enable-annotations-to-deploy disable-annotations-to-deploy logs traces all grafana correlation traffic \
+        cluster app darken metrics enable-annotations-to-deploy disable-annotations-to-deploy logs traces all grafana golden-dashboard correlation traffic \
         verify verify-metrics verify-logs verify-traces urls clean
 
 help: ## Show this help
@@ -191,6 +191,12 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 	@echo ""
 	@echo "  ✓ Grafana up (anonymous admin — no login). Now add Prometheus/Loki/Jaeger datasources"
 	@echo "    in the UI — see docs/05-grafana.md."
+	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+golden-dashboard: ## Apply the bankobs Golden Signals dashboard to Grafana (needs a Prometheus datasource)
+	$(STEP) "Import grafana/golden-signals.json into the running Grafana (POST /api/dashboards/db)" \
+	        "bash scripts/apply-dashboard.sh grafana/golden-signals.json"
+	@echo "  ✓ open Grafana → Dashboards → 'bankobs — Golden Signals' (pick a Service, or All)."
 	@$(MAKE) -s _url HP=3000 NAME=Grafana
 
 # ───────────────────────────────────────────────────────────────────────────────
