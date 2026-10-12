@@ -88,8 +88,9 @@ Sections, in order:
 | 2 | [02-metrics-prometheus.md](02-metrics-prometheus.md) | `make metrics` | Prometheus (pull) |
 | 3 | [03-logs-loki.md](03-logs-loki.md) | `make logs` | Loki + Promtail |
 | 4 | [04-traces-jaeger.md](04-traces-jaeger.md) | `make traces` | Jaeger (direct) |
-| 5 | [05-why-opentelemetry.md](05-why-opentelemetry.md) | — | the payoff |
-| + | [`correlation/`](../correlation/README.md) | `make correlation` | Grafana over all three — click trace↔logs |
+| 5 | [05-grafana.md](05-grafana.md) | `make grafana` | Grafana — add the datasources by hand |
+| 6 | [06-why-opentelemetry.md](06-why-opentelemetry.md) | — | the payoff |
+| + | [`correlation/`](../correlation/README.md) | `make correlation` | Grafana with datasources + trace↔logs pre-wired |
 
 `make all` runs 1→4. `make verify` checks all three. `make urls` prints the UIs.
 `make traffic` generates load so there's something to see. `make clean` removes the

@@ -83,7 +83,8 @@ docs/      00..05  the teaching spine (read these)
 metrics/   Prometheus — Helm values (chart: prometheus-community/prometheus)
 logs/      Loki + Promtail — Helm values (chart: grafana/loki-stack)
 traces/    Jaeger — Helm values (chart: jaegertracing/jaeger) + UI NodePort service
-correlation/ Grafana — Helm values: datasources + trace<->logs + overview dashboard
+grafana/   Grafana — Helm values (plain; you add datasources in the UI, docs/05)
+correlation/ Grafana — same chart, but datasources + trace<->logs PRE-provisioned
 app/       values-no-obs.yaml — the "observability OFF" overlay
 scripts/   step.sh / section.sh — the narration helpers the Makefile uses
 Makefile   run any section; DRY=1 to print-only

@@ -43,7 +43,7 @@ STEP    := @scripts/step.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help tf-install tf-apply tf-destroy kubeconfig kube-check \
-        cluster app darken metrics enable-annotations-to-deploy disable-annotations-to-deploy logs traces all correlation traffic \
+        cluster app darken metrics enable-annotations-to-deploy disable-annotations-to-deploy logs traces all grafana correlation traffic \
         verify verify-metrics verify-logs verify-traces urls clean
 
 help: ## Show this help
@@ -174,14 +174,27 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
-all: app metrics logs traces ## 1→4 in order (the full by-hand build)
+all: app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
 	@echo ""
 	@echo "═══ Done, by hand. Metrics in Prometheus, logs in Loki, traces in Jaeger ═══"
-	@echo "    Now read docs/05-why-opentelemetry.md — three backends, three mechanisms,"
-	@echo "    three configs. OTel's Collector + SDK is what collapses all of that into one."
+	@echo "    Next: make grafana (put a pane over them, docs/05), then docs/06-why-opentelemetry.md."
 
 # ───────────────────────────────────────────────────────────────────────────────
-#  CORRELATION — Grafana (Helm) over all three backends: the trace<->logs payoff
+#  SECTION 5 — GRAFANA (Helm) — then add the datasources yourself in the UI
+# ───────────────────────────────────────────────────────────────────────────────
+grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (docs/05)
+	$(SECTION) "5" "Grafana" "A single pane over your backends. Install it, then add the datasources yourself."
+	$(STEP) "Add the Grafana Helm repo" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
+	$(STEP) "Install a PLAIN Grafana (no datasources — you add them in the UI)" \
+	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
+	@echo ""
+	@echo "  ✓ Grafana up (anonymous admin — no login). Now add Prometheus/Loki/Jaeger datasources"
+	@echo "    in the UI — see docs/05-grafana.md."
+	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+# ───────────────────────────────────────────────────────────────────────────────
+#  CORRELATION — same Grafana, but datasources + trace<->logs PRE-provisioned (the payoff)
 # ───────────────────────────────────────────────────────────────────────────────
 correlation: ## Grafana (Helm) over all 3 backends — dashboards + trace<->logs
 	$(SECTION) "C" "Correlation in Grafana" "One pane over Prometheus+Loki+Jaeger — click from a trace to its logs and back."

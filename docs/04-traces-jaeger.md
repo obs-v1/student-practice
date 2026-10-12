@@ -92,4 +92,4 @@ reason this app can emit them at all is the OpenTelemetry SDK baked into every s
 
 Keep that fresh for the final section.
 
-➡ Next: [05-why-opentelemetry.md](05-why-opentelemetry.md)
+➡ Next: [05-grafana.md](05-grafana.md) — `make grafana`
