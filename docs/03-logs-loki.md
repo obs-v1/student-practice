@@ -78,8 +78,9 @@ Loki has no UI of its own. Two ways to read it:
   curl -s --get 'http://localhost:3100/loki/api/v1/query_range' \
     --data-urlencode 'query={app="upi-service"}' | jq '.data.result[].values[][1]' | head
   ```
-- **Grafana Explore**, if you add a Grafana with Loki as a datasource — the usual way you'd
-  *view* logs in production. Out of scope for this "core" lab, but that's where this leads.
+- **Grafana Explore** — the usual way you'd *view* logs in production. The optional
+  [`correlation/`](../correlation/README.md) module (`make correlation`) stands up Grafana with
+  Loki as a datasource and even links each log line's `trace_id` straight to Jaeger.
 
 The `log_format` label (`json` or `raw`) is carried through from the chart, so you can see
 which services emit structured JSON vs plain text — useful when you later parse them.

@@ -24,7 +24,7 @@ Two of the three pillars need **nothing** from the application:
 
 | Pillar | Does the app need to change? | Why |
 |--------|------------------------------|-----|
-| **Metrics** | No | The app already exposes `/metrics`. Prometheus pulls it. |
+| **Metrics** | No code — just an opt-in annotation | The app already exposes `/metrics`; you add a `prometheus.io/scrape` annotation so Prometheus pulls it (you do this per service — that's the exercise). |
 | **Logs**    | No | The app already writes to stdout. Promtail tails it. |
 | **Traces**  | **Yes — and only OTel can do it** | A trace must be created *inside* the code, as the request flows. Nothing outside the process can reconstruct it. |
 
@@ -89,10 +89,12 @@ Sections, in order:
 | 3 | [03-logs-loki.md](03-logs-loki.md) | `make logs` | Loki + Promtail |
 | 4 | [04-traces-jaeger.md](04-traces-jaeger.md) | `make traces` | Jaeger (direct) |
 | 5 | [05-why-opentelemetry.md](05-why-opentelemetry.md) | — | the payoff |
+| + | [`correlation/`](../correlation/README.md) | `make correlation` | Grafana over all three — click trace↔logs |
 
 `make all` runs 1→4. `make verify` checks all three. `make urls` prints the UIs.
 `make traffic` generates load so there's something to see. `make clean` removes the
-backends.
+backends. The optional **`correlation/`** module (Grafana via Helm) is the payoff: one pane
+over Prometheus + Loki + Jaeger, with one-click pivots from a trace to its logs and back.
 
 ## Prerequisites
 

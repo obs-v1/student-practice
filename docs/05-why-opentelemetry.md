@@ -6,7 +6,7 @@ You just built all three pillars by hand. Stand back and look at what that took.
 
 | Pillar | How you collected it | Who did the work | App change |
 |--------|----------------------|------------------|------------|
-| Metrics | Prometheus **pulls** `/metrics` | a scrape config + RBAC | none (annotation) |
+| Metrics | Prometheus **pulls** `/metrics` | the Prometheus Helm chart + a scrape config | a `prometheus.io/scrape` annotation per service |
 | Logs | Promtail **tails** stdout, pushes to Loki | a Promtail config + DaemonSet | none |
 | Traces | App **pushes** OTLP to Jaeger | in-process **OTel SDK** in every service | the SDK itself |
 
