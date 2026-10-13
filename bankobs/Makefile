@@ -30,7 +30,6 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/' | awk -F '\t' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
 deploy: _check-license ## Deploy the platform: infra manifests + Helm chart + env wiring
-	@sed -e '/^LICENSE_KEY/ c LICENSE_KEY=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjb2hvcnRAYmFua29ic2VydmUzNjAudHJhaW5pbmciLCJodyI6IioiLCJ0aWVyIjoic3R1ZGVudCIsImZlYXR1cmVzIjpbImFsbCJdLCJqdGkiOiI0NDY4OTRhNS00NDg5LTQ5ZDctOGE2Mi0zM2FkYTYxY2MwNjMiLCJpc3MiOiJiYW5rb2JzZXJ2ZTM2MCIsImV4cCI6MTc5ODgwMzM0MSwiaWF0IjoxNzgzMjUxMzQxfQ.RuC_RlHu6yHRrLglVd_ExZynHq1Lb9nlYruoyFfEO5Hk1uU7PU9z5b_F9F7nzW3Hj3MHVJMj5MhGOjYYZWeiAQ' .env.example >.env
 	@echo "🏗  [1/5] namespace + init ConfigMaps + license Secret"
 	@kubectl create namespace $(NS) --dry-run=client -o yaml | kubectl apply -f -
 	@$(KCTL) create configmap oracle-init            --from-file=infrastructure/databases/oracle/init-scripts        --dry-run=client -o yaml | kubectl apply -f -
@@ -81,6 +80,7 @@ _wire-apps:
 	@echo "✓ env injected (deployments roll once with the DB/Kafka/license settings)"
 
 _check-license:
+	@sed -e '/^LICENSE_KEY/ c LICENSE_KEY=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjb2hvcnRAYmFua29ic2VydmUzNjAudHJhaW5pbmciLCJodyI6IioiLCJ0aWVyIjoic3R1ZGVudCIsImZlYXR1cmVzIjpbImFsbCJdLCJqdGkiOiI0NDY4OTRhNS00NDg5LTQ5ZDctOGE2Mi0zM2FkYTYxY2MwNjMiLCJpc3MiOiJiYW5rb2JzZXJ2ZTM2MCIsImV4cCI6MTc5ODgwMzM0MSwiaWF0IjoxNzgzMjUxMzQxfQ.RuC_RlHu6yHRrLglVd_ExZynHq1Lb9nlYruoyFfEO5Hk1uU7PU9z5b_F9F7nzW3Hj3MHVJMj5MhGOjYYZWeiAQ' .env.example >.env
 	@[ -n "$(LICENSE_KEY)" ] || { \
 	  echo "✗ LICENSE_KEY is empty."; \
 	  echo "    cp .env.example .env   and paste your key as LICENSE_KEY=..."; \
