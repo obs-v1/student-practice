@@ -85,9 +85,15 @@ correlation` installs the *same* Grafana but with all three datasources **and** 
 links pre-provisioned (and an overview dashboard). Run it once you've seen the manual version —
 it's the "now automate it" step.
 
-## Dashboards empty? Three checks, in order
+## Dashboards empty? Checks, in order
 
-A blank Golden Signals dashboard is almost always one of these three — walk them top to bottom:
+A blank Golden Signals dashboard is almost always one of these — walk them top to bottom:
+
+0. **Is the `Service` filter pinned to one quiet service?** The dashboard has a **Service**
+   dropdown (top-left) that scopes every panel. It defaults to **All**, but a shared link can
+   pin it to a single service — and the backend *adapters* (e.g. `aadhaar-adapter`, `pan-adapter`)
+   get only a trickle of traffic, so scoped to one of them the graphs look empty. Set
+   **Service → All** (or pick a busy one like `fraud-detection` / `kyc-service`) first.
 
 1. **Is any traffic flowing?** The panels use `rate(...)`, so a flat counter draws nothing.
    Run `make traffic` (a 60s burst) or `make traffic-bg` (keeps load running in the

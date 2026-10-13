@@ -12,6 +12,14 @@ prometheus-node-exporter:{ enabled: false }
 
 server:
   retention: 6h
+  # Scrape every 15s (the chart default is 60s). This matters for the dashboards: Grafana's
+  # $__rate_interval assumes a 15s scrape, so with a 60s scrape every rate()/histogram_quantile
+  # panel resolves to a ~60s window that holds only ONE sample and renders "No data" — while
+  # instant gauges (e.g. resident memory) still work. 15s gives rate() ~4 samples per minute.
+  global:
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    evaluation_interval: 15s
   service:
     type: NodePort
     nodePort: 30909        # kind maps host :9090 -> this nodePort

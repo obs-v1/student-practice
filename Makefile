@@ -216,15 +216,19 @@ correlation: ## Grafana (Helm) over all 3 backends — dashboards + trace<->logs
 # ───────────────────────────────────────────────────────────────────────────────
 #  TRAFFIC + VERIFY + URLS + CLEAN
 # ───────────────────────────────────────────────────────────────────────────────
+# LOAD_INTERVAL = seconds between journeys (lower = denser traffic, clearer graphs).
+# 0.5 -> ~2-3 req/s across the fleet; override with `make traffic LOAD_INTERVAL=2`.
+LOAD_INTERVAL ?= 0.5
+
 traffic: ## Generate load so there is something to see (~60s)
 	$(STEP) "Drive the bankobs portal journeys for ~60s" \
-	        "timeout 60 bash scripts/loadrunner.sh || true"
+	        "INTERVAL=$(LOAD_INTERVAL) timeout 60 bash scripts/loadrunner.sh || true"
 
 traffic-bg: ## Keep load running in the BACKGROUND so the dashboards never go empty
 	$(STEP) "Start the loadrunner detached (writes /tmp/loadrunner.log; stop with 'make traffic-stop')" \
 	        "pkill -f '^bash scripts/loadrunner.sh' 2>/dev/null || true; sleep 1; \
-	         nohup bash scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
-	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f '^bash scripts/loadrunner.sh' | head -1)' — tail -f /tmp/loadrunner.log'"
+	         INTERVAL=$(LOAD_INTERVAL) nohup bash scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
+	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f '^bash scripts/loadrunner.sh' | head -1)' (INTERVAL=$(LOAD_INTERVAL)s) — tail -f /tmp/loadrunner.log'"
 
 traffic-stop: ## Stop the background loadrunner started by 'make traffic-bg'
 	$(STEP) "Stop the background loadrunner" \
