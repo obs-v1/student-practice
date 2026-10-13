@@ -193,10 +193,11 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 	@echo "    in the UI — see docs/05-grafana.md."
 	@$(MAKE) -s _url HP=3000 NAME=Grafana
 
-golden-dashboard: ## Apply the bankobs Golden Signals dashboard to Grafana (needs a Prometheus datasource)
-	$(STEP) "Import grafana/golden-signals.json into the running Grafana (POST /api/dashboards/db)" \
-	        "bash scripts/apply-dashboard.sh grafana/golden-signals.json"
-	@echo "  ✓ open Grafana → Dashboards → 'bankobs — Golden Signals' (pick a Service, or All)."
+golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)
+	$(STEP) "Import the Golden Signals + per-service Errors dashboards (POST /api/dashboards/db)" \
+	        "bash scripts/apply-dashboard.sh grafana/golden-signals.json grafana/errors.json"
+	@echo "  ✓ open Grafana → Dashboards → 'bankobs — Golden Signals'. On the Errors panel, the"
+	@echo "    ▸ link opens 'bankobs — Errors by service' (which service / which endpoint)."
 	@$(MAKE) -s _url HP=3000 NAME=Grafana
 
 # ───────────────────────────────────────────────────────────────────────────────

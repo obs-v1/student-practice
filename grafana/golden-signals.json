@@ -59,10 +59,23 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Errors — share of non-2xx responses",
+      "title": "Errors — non-2xx share  (click ▸ for which service)",
+      "description": "Aggregate error ratio. Use the panel link (top-left ▸) to open the per-service Errors breakdown.",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "links": [
+        { "title": "▸ Which service? Open Errors by service", "url": "/d/bankobs-errors?${service:queryparam}&${datasource:queryparam}&${__url_time_range}", "targetBlank": false }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "links": [
+            { "title": "Errors by service →", "url": "/d/bankobs-errors?${service:queryparam}&${datasource:queryparam}&${__url_time_range}", "targetBlank": false }
+          ]
+        },
+        "overrides": []
+      },
       "targets": [
         { "refId": "A", "expr": "sum(rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) / clamp_min(sum(rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])), 1e-9)", "legendFormat": "error ratio" }
       ]

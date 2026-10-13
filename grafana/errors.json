@@ -1,0 +1,84 @@
+{
+  "uid": "bankobs-errors",
+  "title": "bankobs — Errors by service",
+  "tags": ["bankobs", "errors"],
+  "schemaVersion": 39,
+  "editable": true,
+  "time": { "from": "now-15m", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(http_requests_total{namespace=\"bankobs\"}, app)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Error rate by service (4xx + 5xx, req/s) — tallest line = the culprit",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (app) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0", "legendFormat": "{{app}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Top services by errors / sec",
+      "gridPos": { "h": 10, "w": 10, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "sortBy": [ { "displayName": "Value", "desc": true } ] },
+      "targets": [
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (app) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])) > 0" }
+      ],
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true } } } ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "4xx vs 5xx over time (by service)",
+      "gridPos": { "h": 10, "w": 14, "x": 10, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (app, status) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0", "legendFormat": "{{app}} {{status}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top failing endpoints (service · handler · status)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "sortBy": [ { "displayName": "Value", "desc": true } ] },
+      "targets": [
+        { "refId": "A", "format": "table", "instant": true, "expr": "topk(15, sum by (app, handler, status) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])))" }
+      ],
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true } } } ]
+    }
+  ]
+}
