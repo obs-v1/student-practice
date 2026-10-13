@@ -20,9 +20,35 @@ kubectl -n "$NS" port-forward svc/grafana 3000:80 >/dev/null 2>&1 &
 PF=$!; trap 'kill $PF 2>/dev/null || true' EXIT
 sleep 5
 
+# Discover the Prometheus datasource (prefer the default one) so we can BIND the dashboard's
+# $datasource variable to a real uid — otherwise it imports empty and every panel reads
+# "datasource not found".
+DSJSON="$(curl -s -u "admin:$PW" http://localhost:3000/api/datasources || echo '[]')"
+read -r DSUID DSNAME <<EOF
+$(printf '%s' "$DSJSON" | python3 -c "
+import sys,json
+ds=[d for d in json.load(sys.stdin) if d.get('type')=='prometheus']
+if not ds: print(''); sys.exit()
+d=next((x for x in ds if x.get('isDefault')), ds[0])
+print(d['uid'], d.get('name','Prometheus'))
+")
+EOF
+[ -n "$DSUID" ] && echo "  binding dashboards to Prometheus datasource: $DSNAME ($DSUID)" \
+                || echo "  ⚠ no Prometheus datasource found — add one in Grafana (docs/05) or run 'make correlation'"
+
 for FILE in "$@"; do
-  # wrap the dashboard model as the API expects: {dashboard: {...}, overwrite: true}
-  BODY="$(python3 -c "import json;print(json.dumps({'dashboard':json.load(open('$FILE')),'overwrite':True,'folderId':0}))")"
+  # wrap as the API expects: {dashboard: {...}, overwrite: true}; inject the real DS uid into
+  # the $datasource variable's "current" so the panels bind on load.
+  BODY="$(DSUID="$DSUID" DSNAME="$DSNAME" python3 -c "
+import json,os,sys
+d=json.load(open('$FILE'))
+uid=os.environ.get('DSUID'); name=os.environ.get('DSNAME') or 'Prometheus'
+if uid:
+    for v in d.get('templating',{}).get('list',[]):
+        if v.get('name')=='datasource' and v.get('type')=='datasource':
+            v['current']={'selected':True,'text':name,'value':uid}
+print(json.dumps({'dashboard':d,'overwrite':True,'folderId':0}))
+")"
   RESP="$(curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
     -X POST http://localhost:3000/api/dashboards/db -d "$BODY")"
   echo "$RESP" | python3 -c "
