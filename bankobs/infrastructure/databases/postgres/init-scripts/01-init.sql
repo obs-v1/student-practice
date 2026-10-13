@@ -119,7 +119,7 @@ CREATE TABLE credit_cards (
 CREATE INDEX idx_cards_customer ON credit_cards(customer_id);
 
 CREATE TABLE fixed_deposits (
-  fd_id         VARCHAR(20) PRIMARY KEY,
+  fd_id         VARCHAR(40) PRIMARY KEY,   -- app-generated IDs exceed 20 chars (deposit service)
   customer_id   VARCHAR(20) NOT NULL,
   principal     NUMERIC(12,2) NOT NULL,
   interest_rate NUMERIC(5,2) NOT NULL,
@@ -131,7 +131,7 @@ CREATE TABLE fixed_deposits (
 CREATE INDEX idx_fd_customer ON fixed_deposits(customer_id);
 
 CREATE TABLE recurring_deposits (
-  rd_id         VARCHAR(20) PRIMARY KEY,
+  rd_id         VARCHAR(40) PRIMARY KEY,   -- app-generated IDs exceed 20 chars (deposit service)
   customer_id   VARCHAR(20) NOT NULL,
   monthly_amount NUMERIC(12,2) NOT NULL,
   interest_rate NUMERIC(5,2) NOT NULL,

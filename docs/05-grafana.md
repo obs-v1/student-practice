@@ -85,4 +85,35 @@ correlation` installs the *same* Grafana but with all three datasources **and** 
 links pre-provisioned (and an overview dashboard). Run it once you've seen the manual version —
 it's the "now automate it" step.
 
+## Dashboards empty? Three checks, in order
+
+A blank Golden Signals dashboard is almost always one of these three — walk them top to bottom:
+
+1. **Is any traffic flowing?** The panels use `rate(...)`, so a flat counter draws nothing.
+   Run `make traffic` (a 60s burst) or `make traffic-bg` (keeps load running in the
+   background). Confirm the counter moves:
+   ```
+   # services with live request rate — should be > 0 after ~1 min of load
+   curl -s 'http://localhost:9090/api/v1/query?query=count(sum%20by%20(app)(rate(http_requests_total%7Bnamespace%3D%22bankobs%22%7D%5B5m%5D))%3E0)'
+   ```
+   > **Use a 5m window, not 1m.** Prometheus scrapes every **60s** here, so `rate(...[1m])`
+   > has too few samples and looks empty. Grafana's `$__rate_interval` widens it
+   > automatically — this only bites you when you query the API by hand.
+
+2. **Are services opted into scraping?** The charts ship with the scrape annotation
+   commented out (you opt in by hand). If Prometheus has 0 targets, run
+   `make enable-annotations-to-deploy && make app`, then check
+   `make verify-metrics` (`bankobs targets up:` should be ~55+).
+
+3. **Is the datasource bound?** `make golden-dashboard` auto-discovers the Prometheus
+   datasource and binds it, so the panels read a real `uid` rather than an empty
+   `${datasource}`. If you imported the JSON by hand instead, pick the Prometheus
+   datasource in the dashboard's top-left dropdown.
+
+> **If login itself fails (portal returns 500) there is no traffic to show.** The deposit
+> service writes IDs longer than the schema's original `fd_id`/`rd_id` width; the init
+> script (`infrastructure/databases/postgres/init-scripts/01-init.sql`) now creates those as
+> `VARCHAR(40)`, so a **freshly provisioned** cluster is fine. On a cluster built before that
+> fix, widen them once with `make -C bankobs wait` (runs the `seed-extras` `ALTER`).
+
 ➡ Next: [06-why-opentelemetry.md](06-why-opentelemetry.md)
