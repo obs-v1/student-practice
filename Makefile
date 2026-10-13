@@ -222,13 +222,13 @@ traffic: ## Generate load so there is something to see (~60s)
 
 traffic-bg: ## Keep load running in the BACKGROUND so the dashboards never go empty
 	$(STEP) "Start the loadrunner detached (writes /tmp/loadrunner.log; stop with 'make traffic-stop')" \
-	        "pkill -f scripts/loadrunner.sh 2>/dev/null || true; \
+	        "pkill -f '^bash scripts/loadrunner.sh' 2>/dev/null || true; sleep 1; \
 	         nohup bash scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
-	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f scripts/loadrunner.sh | head -1)' — tail -f /tmp/loadrunner.log'"
+	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f '^bash scripts/loadrunner.sh' | head -1)' — tail -f /tmp/loadrunner.log'"
 
 traffic-stop: ## Stop the background loadrunner started by 'make traffic-bg'
 	$(STEP) "Stop the background loadrunner" \
-	        "pkill -f scripts/loadrunner.sh 2>/dev/null && echo '  stopped' || echo '  (none running)'"
+	        "pkill -f '^bash scripts/loadrunner.sh' 2>/dev/null && echo '  stopped' || echo '  (none running)'"
 
 verify: verify-metrics verify-logs verify-traces ## Check all three pillars
 
