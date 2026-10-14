@@ -48,12 +48,27 @@ kubectl apply -f traces/jaeger-ui.yaml        # UI on a NodePort (16686 -> host 
 kubectl -n bankobs set env deployment -l domain \
   OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true \
   OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none \
-  OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector.monitoring.svc:4317
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector.monitoring.svc:4317 \
+  MANAGEMENT_OTLP_TRACING_ENDPOINT=http://jaeger-collector.monitoring.svc:4318/v1/traces \
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
 ```
 
 Turn the SDK back on (`OTEL_SDK_DISABLED=false`) and point it at Jaeger. The
 `OTEL_*_EXPORTER=none` pair keeps metrics and logs off this path — they stay with Prometheus
 and Loki — so only traces go to Jaeger.
+
+> **Why two different endpoints — the tracing tiers.** bankobs has two kinds of service, and
+> they export traces differently:
+> - **Python services** (adapters, fraud, kyc, notifications…) instrument in-code with the OTel
+>   SDK and push over **OTLP gRPC** → `OTEL_EXPORTER_OTLP_ENDPOINT` (`:4317`).
+> - **Java Spring Boot services** (credit-card, account, loans, deposits — the core-banking
+>   tier) have **no OTel agent**, so the `OTEL_*` vars do nothing for them. Spring Boot's own
+>   tracing exports over **OTLP HTTP** → `MANAGEMENT_OTLP_TRACING_ENDPOINT` (`:4318/v1/traces`),
+>   and defaults to 10% sampling, so `MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0` makes it
+>   capture everything.
+>
+> Set **only** the `OTEL_*` endpoint and the Java core-banking services never show up in Jaeger
+> (you'd get ~23 of 60 services, all the Python tier). Both lines together give full coverage.
 
 That's a real simplification over the course's setup — one fewer moving part, the app talks to
 Jaeger directly.
