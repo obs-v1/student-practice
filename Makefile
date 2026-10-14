@@ -168,7 +168,7 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	$(STEP) "Expose the Jaeger UI on a NodePort (the chart's UI service is headless)" \
 	        "kubectl apply -f traces/jaeger-ui.yaml"
 	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP)"
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP) MANAGEMENT_OTLP_TRACING_ENDPOINT=http://jaeger-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
 	@echo ""
 	@echo "  ✓ Traces are going app → Jaeger directly (jaeger-collector:4317). Generate traffic, then: make verify-traces"
 	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
@@ -314,5 +314,5 @@ clean: ## Remove the backends (leaves the app running)
 	$(STEP) "Delete the monitoring namespace (Loki, Promtail, Jaeger, + anything left)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- || true"
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- MANAGEMENT_OTLP_TRACING_ENDPOINT- MANAGEMENT_TRACING_SAMPLING_PROBABILITY- || true"
 	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C bankobs down)"
