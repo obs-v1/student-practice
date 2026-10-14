@@ -1,0 +1,130 @@
+# Helm values for the OpenTelemetry Collector (chart: open-telemetry/opentelemetry-collector).
+# This ONE agent is the whole difference between this module and the by-hand lab.
+#
+#   by-hand lab:  app ──/metrics──▶ Prometheus (pull)
+#                 node logs ──Promtail──▶ Loki
+#                 app ──OTLP──▶ Jaeger
+#                 → three mechanisms, three wirings.
+#
+#   this module:  app ──OTLP (all 3 signals)──▶ [ OTel Collector ] ──▶ Prometheus
+#                                                                   ├─▶ Loki
+#                                                                   └─▶ Jaeger
+#                 → one SDK, one wire, one place to change where signals go.
+#
+# We deploy in `deployment` mode (a single Deployment, not a per-node DaemonSet) because the
+# app pushes to it over the network — it does not need to be on every node.
+#
+# IMPORTANT — we use the CONTRIB image. The `prometheusremotewrite` and `loki` exporters live
+# in opentelemetry-collector-contrib, not in the core image. `command.name` must therefore be
+# otelcol-contrib (the chart's default command targets the core binary).
+
+mode: deployment
+replicaCount: 1
+fullnameOverride: otel-collector     # -> Service "otel-collector" in the monitoring namespace
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  # Pinned deliberately: the `loki` exporter was DEPRECATED and later REMOVED from contrib.
+  # 0.102.1 still ships it, which we need because the lab's Loki is 2.9.8 (no native OTLP
+  # ingest — that is Loki 3.x). If you move to Loki 3.x, you can drop to a newer collector and
+  # swap the `loki` exporter for a plain `otlphttp` to http://loki:3100/otlp. See docs/04.
+  tag: "0.102.1"
+command:
+  name: otelcol-contrib
+
+# This lab defines the whole pipeline itself — no chart presets injecting extra processors.
+presets:
+  kubernetesAttributes: { enabled: false }   # see docs/03 for how to turn this on (adds RBAC)
+  logsCollection:        { enabled: false }   # we receive logs over OTLP, we do not tail files
+  hostMetrics:           { enabled: false }
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 1Gi }
+
+# The OTLP receiver ports the app exports to. (Chart enables these by default; pinned here so
+# the intent is explicit and the Service publishes 4317/4318.)
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+  metrics:            # the collector's OWN self-telemetry (:8888) — handy for debugging
+    enabled: true
+
+config:
+  receivers:
+    # ONE door for everything the app sends: traces + metrics + logs, all over OTLP.
+    otlp:
+      protocols:
+        grpc: { endpoint: 0.0.0.0:4317 }
+        http: { endpoint: 0.0.0.0:4318 }
+
+  processors:
+    # memory_limiter MUST be first so it can shed load before the batch processor buffers.
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch:
+      timeout: 5s
+      send_batch_size: 1024
+    # stamp a static attribute on every signal — the OTel equivalent of the by-hand lab's
+    # relabel_configs adding `namespace`/`domain`. (For real pod/node/namespace attributes,
+    # add the k8sattributes processor — see docs/03; it needs RBAC, hence left out by default.)
+    resource:
+      attributes:
+        - { key: deployment.environment, value: training, action: upsert }
+
+  exporters:
+    # TRACES → the existing Jaeger all-in-one's native OTLP receiver (same target the by-hand
+    # lab points the app at — here the COLLECTOR points at it instead of the app).
+    otlp/jaeger:
+      endpoint: jaeger-collector.monitoring.svc:4317
+      tls: { insecure: true }
+
+    # METRICS → PUSH to Prometheus via remote-write. This is the semantic opposite of the
+    # by-hand lab (there Prometheus PULLED /metrics). It needs Prometheus started with
+    # --web.enable-remote-write-receiver (see collector/prometheus-rw.values.yaml +
+    # `make enable-remote-write`). resource_to_telemetry_conversion turns OTel resource
+    # attributes into Prometheus labels so you can group series by service.
+    prometheusremotewrite:
+      endpoint: http://prometheus-server.monitoring.svc/api/v1/write
+      tls: { insecure: true }
+      resource_to_telemetry_conversion: { enabled: true }
+
+    # LOGS → Loki's push API. (Loki 2.9.8 has no OTLP endpoint, so we use the contrib `loki`
+    # exporter, which speaks Loki's own push protocol. On Loki 3.x use otlphttp instead.)
+    loki:
+      endpoint: http://loki.monitoring.svc:3100/loki/api/v1/push
+
+    # Prints a one-line summary of every batch to the collector's own logs — your first stop
+    # when something is not arriving ( kubectl -n monitoring logs deploy/otel-collector ).
+    debug:
+      verbosity: basic
+
+  service:
+    telemetry:
+      metrics:
+        address: 0.0.0.0:8888
+    # THREE pipelines, ONE receiver. Change a backend here, in one place, and the app never
+    # knows — that is the whole pitch of the Collector.
+    pipelines:
+      traces:
+        receivers:  [otlp]
+        processors: [memory_limiter, resource, batch]
+        exporters:  [otlp/jaeger, debug]
+      metrics:
+        receivers:  [otlp]
+        processors: [memory_limiter, resource, batch]
+        exporters:  [prometheusremotewrite, debug]
+      logs:
+        receivers:  [otlp]
+        processors: [memory_limiter, resource, batch]
+        exporters:  [loki, debug]

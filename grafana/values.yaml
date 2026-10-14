@@ -1,9 +1,19 @@
 # Helm values for a PLAIN Grafana (chart: grafana/grafana) — deliberately with NO datasources
 # provisioned. You add Prometheus, Loki and Jaeger yourself in the UI (docs/05) so you see how
-# Grafana connects to each backend. Anonymous admin = the UI opens with no login; NodePort 3000.
+# Grafana connects to each backend. Login is ON: sign in as admin / admin. NodePort 3000.
 #
 # (The correlation/ module installs the SAME chart but PRE-provisions all three datasources plus
 #  the trace<->logs wiring — that's the automated version of what you do by hand here.)
+
+# Pin Grafana to the latest 13.x. The grafana/grafana chart's appVersion still tracks 12.x, so
+# we override the image tag directly — the chart runs whatever grafana/grafana image we give it.
+image:
+  tag: "13.2.4"
+
+# Log in with admin / admin (the chart writes these into secret/grafana, which the
+# scripts/add-datasources.sh + apply-dashboard.sh helpers read to call the API).
+adminUser: admin
+adminPassword: admin
 
 service:
   type: NodePort
@@ -11,10 +21,9 @@ service:
 
 grafana.ini:
   auth:
-    disable_login_form: true
+    disable_login_form: false   # show the login page
   "auth.anonymous":
-    enabled: true
-    org_role: Admin         # anonymous users can add datasources — no login needed
+    enabled: false              # require sign-in (admin / admin)
 
 persistence:
   enabled: false            # lab: datasources you add in the UI live only until the pod restarts

@@ -7,17 +7,24 @@
 #   - Jaeger "tracesToLogsV2": from a span, query Loki for that trace id                (trace->logs)
 # Both work because bankobs logs are JSON containing "trace_id":"...".
 
+# Pin Grafana to the latest 13.x (chart appVersion still tracks 12.x, so override the image tag).
+image:
+  tag: "13.2.4"
+
+# Log in with admin / admin.
+adminUser: admin
+adminPassword: admin
+
 service:
   type: NodePort
   nodePort: 30300            # kind maps host :3000 -> this nodePort
 
-# Open straight into the UI — no login for the demo.
+# Sign in as admin / admin.
 grafana.ini:
   auth:
-    disable_login_form: true
+    disable_login_form: false   # show the login page
   "auth.anonymous":
-    enabled: true
-    org_role: Admin
+    enabled: false              # require sign-in
 
 persistence:
   enabled: false

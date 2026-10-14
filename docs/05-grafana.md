@@ -12,8 +12,10 @@ Grafana connects to a backend (it's just a name, a type, and a URL).
 ## Install Grafana
 
 One Helm command. [`grafana/values.yaml`](../grafana/values.yaml) installs a **plain** Grafana —
-NodePort on `:3000`, anonymous admin (so it opens with no login), and **no datasources**
-(that's your job, next).
+NodePort on `:3000`, login as **`admin` / `admin`**, and **no datasources**
+(that's your job, next). The values pin the image to **Grafana 13** (`13.2.4`, the latest 13.x);
+the `grafana/grafana` chart's own appVersion still tracks 12.x, so we override `image.tag` — the
+chart runs whatever image we hand it.
 
 ```bash
 helm repo add grafana https://grafana.github.io/helm-charts
@@ -25,8 +27,8 @@ helm upgrade --install grafana grafana/grafana \
 kubectl -n monitoring rollout status deploy/grafana
 ```
 
-Open it (`make urls` → Grafana, `http://<box>:3000`). It drops you straight into Grafana as an
-admin — no login. Right now it has nothing to show; let's connect it to your backends.
+Open it (`make urls` → Grafana, `http://<box>:3000`). Sign in at the login page with
+**`admin` / `admin`**. Right now it has nothing to show; let's connect it to your backends.
 
 ## Add the three datasources (by hand)
 

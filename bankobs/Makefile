@@ -81,7 +81,7 @@ _wire-apps:
 
 _check-license:
 	@sed -e '/^LICENSE_KEY/ c LICENSE_KEY=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjb2hvcnRAYmFua29ic2VydmUzNjAudHJhaW5pbmciLCJodyI6IioiLCJ0aWVyIjoic3R1ZGVudCIsImZlYXR1cmVzIjpbImFsbCJdLCJqdGkiOiI0NDY4OTRhNS00NDg5LTQ5ZDctOGE2Mi0zM2FkYTYxY2MwNjMiLCJpc3MiOiJiYW5rb2JzZXJ2ZTM2MCIsImV4cCI6MTc5ODgwMzM0MSwiaWF0IjoxNzgzMjUxMzQxfQ.RuC_RlHu6yHRrLglVd_ExZynHq1Lb9nlYruoyFfEO5Hk1uU7PU9z5b_F9F7nzW3Hj3MHVJMj5MhGOjYYZWeiAQ' .env.example >.env
-	@[ -n "$(LICENSE_KEY)" ] || { \
+	@[ -n "$$(grep '^LICENSE_KEY=' .env 2>/dev/null | cut -d= -f2-)" ] || { \
 	  echo "✗ LICENSE_KEY is empty."; \
 	  echo "    cp .env.example .env   and paste your key as LICENSE_KEY=..."; \
 	  echo "    (or run: LICENSE_KEY=eyJ... make deploy)"; exit 1; }
