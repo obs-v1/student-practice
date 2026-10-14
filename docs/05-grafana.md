@@ -30,6 +30,11 @@ admin — no login. Right now it has nothing to show; let's connect it to your b
 
 ## Add the three datasources (by hand)
 
+> **In a hurry?** `make datasources` registers all three at once via the Grafana API (same
+> result as the manual steps below — `prometheus` set as the default, `loki`, `jaeger`). Do it
+> by hand once to understand what a datasource is, then use the target thereafter. For the
+> trace↔logs correlation links on top of these, use `make correlation`.
+
 In Grafana, go to **Connections → Data sources → Add data source** (the ☰ menu on the left, or
 the URL `/connections/datasources/new`). You'll do this three times. Each datasource is just:
 pick the **type**, paste the in-cluster **URL**, click **Save & test**.
@@ -84,6 +89,85 @@ That's exactly what the [`correlation/`](../correlation/README.md) module does: 
 correlation` installs the *same* Grafana but with all three datasources **and** the trace↔logs
 links pre-provisioned (and an overview dashboard). Run it once you've seen the manual version —
 it's the "now automate it" step.
+
+## Follow an error to its root cause (metrics → traces → logs)
+
+This is the payoff of having all three pillars. A single error is four questions, and each
+pillar answers one:
+
+| Question | Pillar | Tells you |
+|---|---|---|
+| Is something wrong? | **Metrics** — Golden Signals | *that* errors are happening, and the rate |
+| **Which** service / endpoint? | **Metrics** — Errors dashboard | the culprit: `app · handler · status` |
+| **Where** in the call chain? | **Traces** — Jaeger | which hop in the request actually broke |
+| **Why** did it break? | **Logs** — Loki | the real exception / error message |
+
+```
+Golden Signals ──▶ Errors dashboard ──▶ Jaeger trace ──▶ Loki logs
+  "errors!"          "upi-service /pay    "the debit span    "ERR_DEBIT:
+                      is 502"              is red here"        Oracle timeout"
+   (metrics)          (metrics)            (traces)            (logs)
+```
+
+### Prerequisite — turn tracing on
+
+Metrics and logs are always on, but **traces are off until you ask for them** (that is the
+whole point of section 4 / the "why OTel" story). Check and enable:
+
+```
+# is the app emitting spans? jaeger-all-in-one alone = nothing from the app
+make traces        # OTEL_SDK_DISABLED=false + MANAGEMENT_TRACING_ENABLED=true, spans → jaeger
+make traffic       # drive some requests so there are failing traces to find
+```
+
+If you skip this, Jaeger will be empty and you can still do **metrics → logs** (steps 1–2 and
+4 below), just not the "where in the call chain" hop.
+
+### Walk it
+
+1. **Which service?** On **Golden Signals**, the **Errors** panel has a link
+   *"▸ Which service? Open Errors by service"* → opens **bankobs — Errors by service**. The
+   *Top failing endpoints* table gives you the culprit, e.g. `upi-service · /pay · 502`.
+
+2. **Where in the call chain?** Open the **jaeger** datasource (Explore, or the Jaeger UI) →
+   **Search** → `service = upi-service`, add tag **`error=true`**, set the time range to the
+   spike → **Run**. Open a failing trace: the **red / errored span** is the exact hop that
+   broke (e.g. `upi-service → account-service → Oracle`). Note its **`trace_id`**.
+
+3. **Why?** Pivot to the **loki** datasource and pull every log line for that one request:
+
+   ```
+   {namespace="bankobs"} |= "<trace_id>"
+   ```
+
+   Those lines carry the real cause — the exception, the failing dependency, the SQL error
+   (e.g. `ERR_DEBIT`, `HikariPool timeout`, `relation ... does not exist`). That is your
+   **why**.
+
+> **Remember the label is `app`, not `service`.** To scope logs to one service use
+> `{app="upi-service"}` (the `service` value lives *inside* the JSON line, reachable with
+> `| json | service="upi-service"`, but it is not a stream label).
+
+### Two ways to make the trace↔logs hop
+
+- **By hand (what you have now):** copy the `trace_id` from the Jaeger span and paste it into
+  the Loki query above. Works, but it is copy-paste.
+- **One click (`make correlation`):** this provisions the datasources with the links, so a
+  Jaeger span grows a **"Logs for this span"** button (jumps straight to the Loki logs for that
+  trace) and a Loki line's **`trace_id`** becomes a link back into Jaeger. It is the same
+  journey, without the copy-paste — the `derivedFields` (Loki→Jaeger) and `tracesToLogsV2`
+  (Jaeger→Loki) that a hand-added datasource does not have.
+
+### No traces? Metrics → logs still gets you most of the way
+
+If you have not run `make traces`, you can still answer *what* and *why* — just skip the Jaeger
+hop: from the Errors dashboard you know the service, so query its errors directly:
+
+```
+{app="upi-service"} | json | level="ERROR"
+```
+
+The only thing you lose is *where in the call chain* — which the trace would have shown you.
 
 ## Dashboards empty? Checks, in order
 

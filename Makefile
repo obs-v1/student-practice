@@ -189,9 +189,15 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 	$(STEP) "Install a PLAIN Grafana (no datasources — you add them in the UI)" \
 	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
 	@echo ""
-	@echo "  ✓ Grafana up (anonymous admin — no login). Now add Prometheus/Loki/Jaeger datasources"
-	@echo "    in the UI — see docs/05-grafana.md."
+	@echo "  ✓ Grafana up (anonymous admin — no login). Add the datasources by hand in the UI"
+	@echo "    (docs/05-grafana.md) — or run 'make datasources' to register all three at once."
 	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+datasources: ## Register Prometheus + Loki + Jaeger datasources in one shot (instead of the UI)
+	$(STEP) "Register all three datasources via the Grafana API (prometheus=default, loki, jaeger)" \
+	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
+	@echo "  ✓ datasources added. Try them in Explore, or run 'make golden-dashboard'."
+	@echo "    (For the trace↔logs correlation links on top of these, use 'make correlation'.)"
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)
 	$(STEP) "Import the Golden Signals + per-service Errors dashboards (POST /api/dashboards/db)" \
