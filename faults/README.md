@@ -31,22 +31,25 @@ service/datastore name.
 
 ## Two honest facts about this app (they shape the scenarios)
 
-1. **bankobs degrades gracefully — it does not emit unhandled 5xx.** Take out a dependency
-   (a peer service *or* a database) and the callers return a *handled* 4xx, not a 500. We proved
-   this live: scaling down the KYC adapters, MongoDB, Redis, and even `account-service` produced
-   **zero** 5xx. So the "errors" scenario is a genuine **4xx spike**, and the only way to force a
-   hard "down" is `app-crash` (CrashLoop → `up == 0`). That resilience is itself a teaching point.
+1. **Breaking a journey service DOES surface a real 5xx — on the caller.** Take out a service
+   that sits on a live journey and its caller returns a genuine `502 ERR_UPSTREAM`. Proven live:
+   `app-down TARGET=upi-service` → **`payment-gateway` and `gateway-service` return 5xx**
+   (`~0.4/s` each), and the portal answers `502 ERR_UPSTREAM`. The *Python* lookup/adapter tier
+   is more resilient (a dead dependency there yields handled 4xx), but the **Go payment tier
+   propagates upstream failures as 5xx**. So: target a **journey/payment service** for a 5xx
+   incident; `insurance-service` (the app-crash/app-down default) is a leaf and only gives an
+   **availability** signal (`up == 0`), not 5xx.
 
-2. **Two metric names, by tier.** The Python services expose `http_requests_total`; the Go
-   **payment tier** (`upi-service`, `payment-gateway`) exposes the OpenTelemetry name
-   `http_server_requests_total`. **Both** carry `status="2xx|4xx|5xx"`. The Golden Signals
-   dashboard queries the Python name, so payment-tier errors need the OTel name:
+2. **Two metric names, by tier — the dashboards now union both.** Python services expose
+   `http_requests_total`; the Go **payment tier** (`upi-service`, `payment-gateway`,
+   `gateway-service`) exposes the OpenTelemetry name `http_server_requests_total`. Both carry
+   `status="2xx|4xx|5xx"`. The Golden Signals + Errors dashboards query **both** via
+   `{__name__=~"http_requests_total|http_server_requests_total", …}`, so payment-tier 5xx now
+   show up without a separate query. (To check by hand:)
    ```promql
-   sum by (app) (rate(http_server_requests_total{namespace="bankobs",
-                 app=~"upi-service|payment-gateway", status="4xx"}[5m]))
+   sum by (app) (rate({__name__=~"http_requests_total|http_server_requests_total",
+                 namespace="bankobs", status="5xx"}[5m])) > 0
    ```
-   (Tip: the payment tier already runs a steady ~0.8/s of 4xx from the load generator's
-   ghost-VPA payments — a real error stream to practice on.)
 
 ## A worked drill-down (app-crash)
 

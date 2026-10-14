@@ -1,6 +1,6 @@
 {
   "uid": "bankobs-golden",
-  "title": "bankobs \u2014 Golden Signals",
+  "title": "bankobs — Golden Signals",
   "tags": [
     "bankobs",
     "golden-signals"
@@ -34,7 +34,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(http_requests_total{namespace=\"bankobs\"}, app)",
+        "query": "label_values({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\"}, app)",
         "includeAll": true,
         "allValue": ".*",
         "multi": true,
@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Latency \u2014 request duration (p50 / p95 / p99)",
+      "title": "Latency — request duration (p50 / p95 / p99)",
       "gridPos": {
         "h": 9,
         "w": 24,
@@ -71,17 +71,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate({__name__=~\"http_request_duration_seconds_bucket|http_server_request_duration_seconds_bucket\", namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate({__name__=~\"http_request_duration_seconds_bucket|http_server_request_duration_seconds_bucket\", namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
           "legendFormat": "p95"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate({__name__=~\"http_request_duration_seconds_bucket|http_server_request_duration_seconds_bucket\", namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])))",
           "legendFormat": "p99"
         }
       ]
@@ -89,7 +89,7 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Traffic \u2014 requests / sec (by service)",
+      "title": "Traffic — requests / sec (by service)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -109,7 +109,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (app) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval]))",
+          "expr": "sum by (app) (rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval]))",
           "legendFormat": "{{app}}"
         }
       ]
@@ -117,8 +117,8 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Errors \u2014 non-2xx share  (click \u25b8 for which service)",
-      "description": "Aggregate error ratio. Use the panel link (top-left \u25b8) to open the per-service Errors breakdown.",
+      "title": "Errors — non-2xx share  (click ▸ for which service)",
+      "description": "Aggregate error ratio. Use the panel link (top-left ▸) to open the per-service Errors breakdown.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -131,7 +131,7 @@
       },
       "links": [
         {
-          "title": "\u25b8 Which service? Open Errors by service",
+          "title": "▸ Which service? Open Errors by service",
           "url": "/d/bankobs-errors?${service:queryparam}&${datasource:queryparam}&${__url_time_range}",
           "targetBlank": false
         }
@@ -142,7 +142,7 @@
           "min": 0,
           "links": [
             {
-              "title": "Errors by service \u2192",
+              "title": "Errors by service →",
               "url": "/d/bankobs-errors?${service:queryparam}&${datasource:queryparam}&${__url_time_range}",
               "targetBlank": false
             }
@@ -153,7 +153,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) / clamp_min(sum(rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) / clamp_min(sum(rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "error ratio"
         }
       ]
@@ -161,7 +161,7 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Saturation \u2014 CPU (cores, by service)",
+      "title": "Saturation — CPU (cores, by service)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -189,7 +189,7 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Saturation \u2014 resident memory (by service)",
+      "title": "Saturation — resident memory (by service)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -219,27 +219,83 @@
       "type": "stat",
       "title": "Services DOWN (up == 0)",
       "description": "Non-zero = an availability incident, e.g. 'make fault NAME=app-crash' (CrashLoop -> up==0). Note: a service SCALED to 0 leaves service-discovery entirely, so it drops off the chart rather than showing 0.",
-      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 25 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [ { "refId": "A", "expr": "count(up{namespace=\"bankobs\"} == 0) or vector(0)" } ]
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up{namespace=\"bankobs\"} == 0) or vector(0)"
+        }
+      ]
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Availability — up per service (0 = down / crashlooping)",
-      "gridPos": { "h": 7, "w": 18, "x": 6, "y": 25 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "unit": "none", "min": 0, "max": 1 }, "overrides": [] },
-      "targets": [ { "refId": "A", "expr": "up{namespace=\"bankobs\", app=~\"$service\"}", "legendFormat": "{{app}}" } ]
+      "gridPos": {
+        "h": 7,
+        "w": 18,
+        "x": 6,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{namespace=\"bankobs\", app=~\"$service\"}",
+          "legendFormat": "{{app}}"
+        }
+      ]
     }
   ]
 }

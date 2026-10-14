@@ -1,6 +1,6 @@
 {
   "uid": "bankobs-errors",
-  "title": "bankobs \u2014 Errors by service",
+  "title": "bankobs — Errors by service",
   "tags": [
     "bankobs",
     "errors"
@@ -34,7 +34,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(http_requests_total{namespace=\"bankobs\"}, app)",
+        "query": "label_values({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\"}, app)",
         "includeAll": true,
         "allValue": ".*",
         "multi": true,
@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Error rate by service (4xx + 5xx, req/s) \u2014 tallest line = the culprit",
+      "title": "Error rate by service (4xx + 5xx, req/s) — tallest line = the culprit",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -71,7 +71,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (app) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0",
+          "expr": "sum by (app) (rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0",
           "legendFormat": "{{app}}"
         }
       ]
@@ -109,7 +109,7 @@
           "refId": "A",
           "format": "table",
           "instant": true,
-          "expr": "sum by (app) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])) > 0"
+          "expr": "sum by (app) (rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])) > 0"
         }
       ],
       "transformations": [
@@ -147,7 +147,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (app, status) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0",
+          "expr": "sum by (app, status) (rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[$__rate_interval])) > 0",
           "legendFormat": "{{app}} {{status}}"
         }
       ]
@@ -155,7 +155,7 @@
     {
       "id": 4,
       "type": "table",
-      "title": "Top failing endpoints (service \u00b7 handler \u00b7 status)",
+      "title": "Top failing endpoints (service · handler · status)",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -185,7 +185,7 @@
           "refId": "A",
           "format": "table",
           "instant": true,
-          "expr": "topk(15, sum by (app, handler, status) (rate(http_requests_total{namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])))"
+          "expr": "topk(15, sum by (app, handler, status) (rate({__name__=~\"http_requests_total|http_server_requests_total\", namespace=\"bankobs\", app=~\"$service\", status=~\"[45]xx\"}[5m])))"
         }
       ],
       "transformations": [
