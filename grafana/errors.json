@@ -67,9 +67,9 @@
           "unit": "reqps",
           "links": [
             {
-              "title": "🔍 Error traces for ${__field.name} → Jaeger",
-              "targetBlank": true,
-              "url": "http://JAEGER_HOST/search?service=${__field.name}&tags=%7B%22error%22%3A%22true%22%7D&lookback=1h&limit=20"
+              "title": "🔍 Error traces (${__field.name}) → Explore",
+              "targetBlank": false,
+              "url": "/explore?schemaVersion=1&panes=%7B%22trc%22%3A%7B%22datasource%22%3A%22JAEGER_UID%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22jaeger%22%2C%22uid%22%3A%22JAEGER_UID%22%7D%2C%22queryType%22%3A%22search%22%2C%22service%22%3A%22${__field.name}%22%2C%22tags%22%3A%22error%3Dtrue%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D%7D&orgId=1"
             }
           ]
         },
@@ -102,9 +102,9 @@
           "unit": "reqps",
           "links": [
             {
-              "title": "🔍 Error traces for ${__data.fields.app} → Jaeger",
-              "targetBlank": true,
-              "url": "http://JAEGER_HOST/search?service=${__data.fields.app}&tags=%7B%22error%22%3A%22true%22%7D&lookback=1h&limit=20"
+              "title": "🔍 Error traces (${__data.fields.app}) → Explore",
+              "targetBlank": false,
+              "url": "/explore?schemaVersion=1&panes=%7B%22trc%22%3A%7B%22datasource%22%3A%22JAEGER_UID%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22jaeger%22%2C%22uid%22%3A%22JAEGER_UID%22%7D%2C%22queryType%22%3A%22search%22%2C%22service%22%3A%22${__data.fields.app}%22%2C%22tags%22%3A%22error%3Dtrue%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D%7D&orgId=1"
             }
           ]
         },
