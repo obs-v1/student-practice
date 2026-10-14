@@ -213,6 +213,33 @@
           "legendFormat": "{{app}}"
         }
       ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Services DOWN (up == 0)",
+      "description": "Non-zero = an availability incident, e.g. 'make fault NAME=app-crash' (CrashLoop -> up==0). Note: a service SCALED to 0 leaves service-discovery entirely, so it drops off the chart rather than showing 0.",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "count(up{namespace=\"bankobs\"} == 0) or vector(0)" } ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Availability — up per service (0 = down / crashlooping)",
+      "gridPos": { "h": 7, "w": 18, "x": 6, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "none", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "up{namespace=\"bankobs\", app=~\"$service\"}", "legendFormat": "{{app}}" } ]
     }
   ]
 }
