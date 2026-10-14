@@ -36,10 +36,15 @@ EOF
 [ -n "$DSUID" ] && echo "  binding dashboards to Prometheus datasource: $DSNAME ($DSUID)" \
                 || echo "  ⚠ no Prometheus datasource found — add one in Grafana (docs/05) or run 'make correlation'"
 
+# Jaeger uid for the Errors-dashboard "Traces for this service" drill-down link (JAEGER_UID placeholder).
+JDSUID="$(printf '%s' "$DSJSON" | python3 -c "import sys,json;ds=[d for d in json.load(sys.stdin) if d.get('type')=='jaeger'];print(ds[0]['uid'] if ds else '')")"
+[ -n "$JDSUID" ] && echo "  trace drill-down links -> Jaeger datasource ($JDSUID)" \
+                 || echo "  ⚠ no Jaeger datasource — the Errors 'Traces for this service' link needs one (make datasources)"
+
 for FILE in "$@"; do
   # wrap as the API expects: {dashboard: {...}, overwrite: true}; inject the real DS uid into
   # the $datasource variable's "current" so the panels bind on load.
-  BODY="$(DSUID="$DSUID" DSNAME="$DSNAME" python3 -c "
+  BODY="$(DSUID="$DSUID" DSNAME="$DSNAME" JDSUID="$JDSUID" python3 -c "
 import json,os,sys
 d=json.load(open('$FILE'))
 uid=os.environ.get('DSUID'); name=os.environ.get('DSNAME') or 'Prometheus'
@@ -47,7 +52,10 @@ if uid:
     for v in d.get('templating',{}).get('list',[]):
         if v.get('name')=='datasource' and v.get('type')=='datasource':
             v['current']={'selected':True,'text':name,'value':uid}
-print(json.dumps({'dashboard':d,'overwrite':True,'folderId':0}))
+body=json.dumps({'dashboard':d,'overwrite':True,'folderId':0})
+jd=os.environ.get('JDSUID')
+if jd: body=body.replace('JAEGER_UID', jd)   # wire the Errors drill-down link to the real Jaeger ds
+print(body)
 ")"
   RESP="$(curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
     -X POST http://localhost:3000/api/dashboards/db -d "$BODY")"
