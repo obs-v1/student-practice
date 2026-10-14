@@ -68,7 +68,18 @@ and Loki — so only traces go to Jaeger.
 >   capture everything.
 >
 > Set **only** the `OTEL_*` endpoint and the Java core-banking services never show up in Jaeger
-> (you'd get ~23 of 60 services, all the Python tier). Both lines together give full coverage.
+> (you'd get ~23 of 60 services, all the Python tier). Both lines together give the Python **and**
+> Java tiers (~43 services).
+>
+> **There's a third tier: the Go services** (`gateway-service`, `payment-gateway`, `upi-service`).
+> They have **no OpenTelemetry compiled in**, and Go has no runtime agent — so *no* env var makes
+> them emit spans. A payment trace is left with holes exactly at those hops. The only way to trace
+> them without changing the images is **eBPF auto-instrumentation**, so `make traces` also deploys
+> **Grafana Beyla** (a privileged DaemonSet, [`traces/beyla.yaml`](../traces/beyla.yaml)) that
+> attaches to the Go binaries in the kernel and emits OTLP traces to the same Jaeger — scoped by
+> port so it doesn't double-trace the OTel tiers. That fills the Go hops (→ ~46 services) and is a
+> nice lesson in itself: **three ways to get a trace** — in-code SDK (Python), framework exporter
+> (Java/Spring), and zero-code eBPF (Go) — all now wired by the one `make traces` step.
 
 That's a real simplification over the course's setup — one fewer moving part, the app talks to
 Jaeger directly.

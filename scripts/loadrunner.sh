@@ -136,9 +136,11 @@ j_fail() {
   ppost /api/upi/pay "{\"from_vpa\":\"ghost9999@bankobs\",\"to_vpa\":\"$(vpa)\",\"amount\":500,\"remarks\":\"loadrunner-fail\"}"
 }
 
-# Weighted journey mix: payments dominate, as they do in the real product.
+# Weighted journey mix: payments dominate, as they do in the real product. (Payments return a
+# realistic ERR_LIMIT 4xx once the test VPAs hit their daily cap — that's expected error traffic,
+# and it's what makes the 5xx drill work: with upi-service down, payment-gateway returns 502.)
 JOURNEYS=(
-  j_upi j_upi j_upi j_upi j_upi j_upi        # ~30% payments
+  j_upi j_upi j_upi j_upi j_upi j_upi          # ~30% payments
   j_accounts j_accounts j_accounts j_accounts # ~20% core reads
   j_loan j_loan j_deposits j_cards            # retail
   j_rails j_rails j_crossborder               # other rails

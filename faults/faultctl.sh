@@ -25,7 +25,7 @@ LOADRUNNER="$ROOT/scripts/loadrunner.sh"
 # sensible, low-blast-radius defaults
 DEF_APP="insurance-service"     # a graceful Python service, safe to crash/stop
 DEF_DB="mongodb"                # a datastore, safe to bounce
-DEF_LAT="kyc-service"           # has steady traffic, good for a latency story
+DEF_LAT="account-service"       # core service on the payment path; its p95 visibly climbs under delay
 
 c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_cyn=$'\033[1;36m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 say()  { printf '%s%s%s\n' "$c_cyn" "$*" "$c_off"; }
@@ -50,17 +50,19 @@ faultctl.sh — observable fault scenarios for the bankobs lab
   faults/faultctl.sh status | list
 
 scenarios:
+  app-down   [svc]   Scale a service to 0.  TARGET=upi-service -> real 5xx (ERR_UPSTREAM) on
+                     payment-gateway/gateway-service.               default: $DEF_APP
+  latency    [svc]   Inject network delay (default 800ms).  p95 of the service climbs; traces
+                     show the slow span.   LAT_MS=2000 to tune.      default: $DEF_LAT
   app-crash  [svc]   CrashLoop a service (pod up, un-scrapable)   -> up == 0        default: $DEF_APP
-  app-down   [svc]   Scale a service to 0 (gone from the fleet)   -> traffic gap    default: $DEF_APP
   db-down    [db]    Scale a datastore statefulset to 0           -> db up == 0     default: $DEF_DB
   errors     [pct]   Drive a real 4xx error SPIKE (load failures) -> 4xx rate up    default: 50
-  latency    [svc]   CPU-throttle a service to 0.1 cores          -> p95 / CPU up   default: $DEF_LAT
 
-examples:
-  faults/faultctl.sh app-crash start                 # crash $DEF_APP
-  faults/faultctl.sh app-crash stop
-  faults/faultctl.sh db-down   start postgres
-  faults/faultctl.sh errors    start 70
+the two demo scenarios:
+  faults/faultctl.sh app-down start upi-service      # 5xx incident  -> payment-gateway/gateway 5xx
+  faults/faultctl.sh latency  start                  # latency incident -> account-service p95 up
+  faults/faultctl.sh app-down stop upi-service
+  faults/faultctl.sh latency  stop
   faults/faultctl.sh status
 TXT
 }
@@ -142,35 +144,24 @@ errors)
 # ─────────────────────────────────────────────────────────────────── latency ──
 latency)
   t="${target:-$DEF_LAT}"
-  FPOD_SEL='-l app=fault-injector'
+  ms="${LAT_MS:-1500}"
   case "$action" in
     start)
-      say "latency: arming the fault-injector and CPU-throttling $t to 0.1 cores"
-      kubectl -n "$NS" scale deploy/fault-injector --replicas=1 >/dev/null 2>&1 || true
-      kubectl -n "$NS" rollout status deploy/fault-injector --timeout=90s >/dev/null 2>&1 || true
-      FPOD=$(kubectl -n "$NS" get pod $FPOD_SEL -o name | head -1)
-      kubectl -n "$NS" exec "$FPOD" -- wget -qO- --header='Content-Type: application/json' \
-        --post-data="{\"type\":\"cpu_throttle\",\"duration_seconds\":1800,\"target\":{\"service\":\"$t\"},\"params\":{\"cpu_percent\":95}}" \
-        http://localhost:8091/api/v1/faults >/dev/null 2>&1 || true
-      ok "$t CPU limit throttled to 0.1 cores"
-      hint "Golden Signals Saturation(CPU): $t pegs near its limit under load"
-      hint "Latency p95 only rises if $t is CPU-bound — drive heavy load to see it; sim services may stay ~95ms"
-      hint "best latency story is on the Go payment tier (real work): try 'latency start upi-service'" ;;
+      say "latency: adding a ${ms}ms tc-netem delay to $t's network (eBPF-free, via kubectl debug)"
+      pod=$(kubectl -n "$NS" get pod -l app="$t" --field-selector=status.phase=Running -o name 2>/dev/null | head -1 | sed 's#pod/##')
+      [ -n "$pod" ] || { echo "✗ no running pod for $t"; exit 1; }
+      kubectl -n "$NS" debug "$pod" --image=nicolaka/netshoot:latest --profile=netadmin -q -- \
+        tc qdisc add dev eth0 root netem delay "${ms}ms" >/dev/null 2>&1
+      ok "$t's network is now delayed ~${ms}ms (every in/out call waits)"
+      hint "Golden Signals Latency: set Service=$t -> its p95 climbs to ~${ms}ms+ (callers inherit it too)"
+      hint "Saturation stays flat -> it's WAIT, not CPU/mem. Jaeger: $t's span is the long one"
+      hint "tune:  LAT_MS=3000 make fault NAME=latency TARGET=$t" ;;
     stop)
-      say "latency: clearing the throttle on $t and restoring its CPU limit"
-      FPOD=$(kubectl -n "$NS" get pod $FPOD_SEL -o name 2>/dev/null | head -1)
-      if [ -n "$FPOD" ]; then
-        for id in $(kubectl -n "$NS" exec "$FPOD" -- wget -qO- http://localhost:8091/api/v1/faults 2>/dev/null \
-            | python3 -c 'import sys,json;[print(f["id"]) for f in json.load(sys.stdin)["data"]["active"]]' 2>/dev/null); do
-          kubectl -n "$NS" exec "$FPOD" -- wget -qO- "http://localhost:8091/api/v1/faults/$id" >/dev/null 2>&1 || true
-        done
-      fi
-      # the injector's DELETE is unreliable from busybox; restore the CPU limit directly
-      kubectl -n "$NS" scale deploy/fault-injector --replicas=0 >/dev/null 2>&1 || true
-      kubectl -n "$NS" patch deploy "$t" --type=json \
-        -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/cpu","value":"500m"}]' >/dev/null 2>&1 || true
-      kubectl -n "$NS" rollout status deploy/"$t" --timeout=90s >/dev/null 2>&1 || true
-      ok "$t CPU limit restored (500m); injector disarmed" ;;
+      say "latency: clearing the netem delay on $t (recreating its pod)"
+      # netem lives on the pod's eth0 qdisc; deleting the pod gives a clean interface back
+      kubectl -n "$NS" delete pod -l app="$t" --wait=false >/dev/null 2>&1 || true
+      kubectl -n "$NS" rollout status deploy/"$t" --timeout=120s >/dev/null 2>&1 || true
+      ok "$t pod recreated — netem gone" ;;
     *) usage; exit 2 ;;
   esac ;;
 # ──────────────────────────────────────────────────────────────────── status ──

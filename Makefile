@@ -169,9 +169,12 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	        "kubectl apply -f traces/jaeger-ui.yaml"
 	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP) MANAGEMENT_OTLP_TRACING_ENDPOINT=http://jaeger-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
+	$(STEP) "eBPF-instrument the Go payment tier (gateway/payment-gateway/upi) — they have NO in-code OTel (Beyla, traces/beyla.yaml)" \
+	        "kubectl apply -f traces/beyla.yaml && kubectl -n $(OBS_NS) rollout status daemonset/beyla --timeout=120s"
 	@echo ""
-	@echo "  ✓ Traces are going app → Jaeger directly (jaeger-collector:4317). Generate traffic, then: make verify-traces"
-	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
+	@echo "  ✓ Traces flowing three ways into Jaeger: Python (in-code SDK), Java (Spring OTLP), Go (eBPF/Beyla)."
+	@echo "    Beyla is a privileged DaemonSet scoped by port (8000/8010/8011) so it won't double-trace the OTel tiers."
+	@echo "    Generate traffic, then: make verify-traces   (docs/04 explains the three tiers)"
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
 all: enable-annotations-to-deploy app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
@@ -315,4 +318,6 @@ clean: ## Remove the backends (leaves the app running)
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
 	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- MANAGEMENT_OTLP_TRACING_ENDPOINT- MANAGEMENT_TRACING_SAMPLING_PROBABILITY- || true"
+	$(STEP) "Remove the Beyla eBPF cluster RBAC (its DaemonSet went with the monitoring namespace)" \
+	        "kubectl delete clusterrole beyla clusterrolebinding beyla --ignore-not-found 2>/dev/null || true"
 	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C bankobs down)"

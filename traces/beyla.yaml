@@ -1,0 +1,68 @@
+# Grafana Beyla — eBPF auto-instrumentation for the Go payment tier.
+#
+# gateway-service, payment-gateway and upi-service are Go binaries with NO in-code OpenTelemetry,
+# so no env var makes them emit spans (unlike Java, which just needed the Spring OTLP endpoint, or
+# Python, which instruments itself). Beyla attaches to them in the KERNEL via eBPF and produces
+# OTLP traces — no code or image change. It exports to the same Jaeger the rest of the stack uses,
+# so those Go hops finally show up in the trace waterfall.
+#
+# Scoped by LISTENING PORT (8000/8010/8011) so Beyla instruments ONLY the three Go services and
+# does not double-trace the Python/Java services that already report. Needs a kernel >= 5.8 with
+# BTF (RHEL 9 / the kind node both have it) and a privileged, hostPID DaemonSet.
+#
+#   kubectl apply -f traces/beyla.yaml      (or: make traces-ebpf)
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: beyla, namespace: monitoring }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: beyla }
+rules:
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: beyla }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: beyla }
+subjects:
+  - { kind: ServiceAccount, name: beyla, namespace: monitoring }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beyla
+  namespace: monitoring
+  labels: { app: beyla }
+spec:
+  selector: { matchLabels: { app: beyla } }
+  template:
+    metadata: { labels: { app: beyla } }
+    spec:
+      serviceAccountName: beyla
+      hostPID: true                       # eBPF needs to see the host PID namespace
+      containers:
+        - name: beyla
+          image: grafana/beyla:3.38.0
+          securityContext:
+            privileged: true              # simplest; eBPF load + CO-RE BTF read
+            runAsUser: 0
+          env:
+            # instrument ONLY these Go services (by listening port), nothing else
+            - { name: BEYLA_OPEN_PORT, value: "8000,8010,8011" }
+            # decorate spans with k8s pod/deployment/namespace (uses the RBAC above)
+            - { name: BEYLA_KUBERNETES_ENABLE, value: "true" }
+            # traces ONLY, to Jaeger's OTLP-HTTP receiver (no metrics endpoint set = metrics off)
+            - { name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://jaeger-collector.monitoring.svc:4318/v1/traces" }
+            - { name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, value: "http/protobuf" }
+            - name: KUBE_NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 512Mi }
