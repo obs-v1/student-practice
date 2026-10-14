@@ -240,6 +240,23 @@ traffic-stop: ## Stop the background loadrunner started by 'make traffic-bg'
 	$(STEP) "Stop the background loadrunner" \
 	        "pkill -f '^bash scripts/loadrunner.sh' 2>/dev/null && echo '  stopped' || echo '  (none running)'"
 
+# ───────────────────────────────────────────────────────────────────────────────
+#  FAULTS — inject OBSERVABLE incidents to practice the drill-down (see faults/README.md)
+# ───────────────────────────────────────────────────────────────────────────────
+fault: ## Inject a fault:  make fault NAME=app-crash [TARGET=insurance-service]   (NAME=app-crash|app-down|db-down|errors|latency)
+	$(STEP) "Inject fault scenario: $(NAME) $(TARGET)" \
+	        "bash faults/faultctl.sh $(NAME) start $(TARGET)"
+
+fault-stop: ## Revert a fault:  make fault-stop NAME=app-crash [TARGET=insurance-service]
+	$(STEP) "Revert fault scenario: $(NAME) $(TARGET)" \
+	        "bash faults/faultctl.sh $(NAME) stop $(TARGET)"
+
+fault-status: ## Show which fault scenarios are currently active
+	@bash faults/faultctl.sh status
+
+fault-list: ## List the available fault scenarios
+	@bash faults/faultctl.sh list
+
 verify: verify-metrics verify-logs verify-traces ## Check all three pillars
 
 verify-metrics: ## How many app targets is Prometheus scraping?
