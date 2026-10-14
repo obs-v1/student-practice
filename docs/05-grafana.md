@@ -32,10 +32,12 @@ Open it (`make urls` → Grafana, `http://<box>:3000`). Sign in at the login pag
 
 ## Add the three datasources (by hand)
 
-> **In a hurry?** `make datasources` registers all three at once via the Grafana API (same
-> result as the manual steps below — `prometheus` set as the default, `loki`, `jaeger`). Do it
-> by hand once to understand what a datasource is, then use the target thereafter. For the
-> trace↔logs correlation links on top of these, use `make correlation`.
+> **In a hurry?** `make datasources` registers all three at once via the Grafana API
+> (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the trace↔logs correlation —
+> Jaeger's "Trace to logs" → Loki (`{namespace="bankobs"} |= "${__trace.traceId}"`) and Loki's
+> derived-field `trace_id` → Jaeger. Do it by hand once (below) to understand what a datasource
+> is, then use the target thereafter. (`make correlation` is the fully-provisioned variant with
+> an overview dashboard baked in.)
 
 In Grafana, go to **Connections → Data sources → Add data source** (the ☰ menu on the left, or
 the URL `/connections/datasources/new`). You'll do this three times. Each datasource is just:

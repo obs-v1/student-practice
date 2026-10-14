@@ -174,10 +174,12 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	@echo "    The catch (docs/04): the app can only do this because it is OTel-instrumented."
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
-all: app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
+all: enable-annotations-to-deploy app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
 	@echo ""
-	@echo "═══ Done, by hand. Metrics in Prometheus, logs in Loki, traces in Jaeger ═══"
-	@echo "    Next: make grafana (put a pane over them, docs/05), then docs/06-why-opentelemetry.md."
+	@echo "═══ Done. Services opted into scraping; metrics in Prometheus, logs in Loki, traces in Jaeger ═══"
+	@echo "    Next: make grafana && make datasources && make golden-dashboard && make traffic-bg"
+	@echo "    (docs/02 shows opting services in BY HAND — 'make all' does it for you so the dashboards"
+	@echo "     have data; without opt-in Prometheus scrapes 0 targets and Golden Signals stays blank.)"
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 5 — GRAFANA (Helm) — then add the datasources yourself in the UI
@@ -196,8 +198,8 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 datasources: ## Register Prometheus + Loki + Jaeger datasources in one shot (instead of the UI)
 	$(STEP) "Register all three datasources via the Grafana API (prometheus=default, loki, jaeger)" \
 	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
-	@echo "  ✓ datasources added. Try them in Explore, or run 'make golden-dashboard'."
-	@echo "    (For the trace↔logs correlation links on top of these, use 'make correlation'.)"
+	@echo "  ✓ datasources added + trace↔logs wired (Jaeger 'Logs for this span' → Loki, and back)."
+	@echo "    Try them in Explore, or run 'make golden-dashboard'."
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)
 	$(STEP) "Import the Golden Signals + per-service Errors dashboards (POST /api/dashboards/db)" \
@@ -225,16 +227,26 @@ correlation: ## Grafana (Helm) over all 3 backends — dashboards + trace<->logs
 # LOAD_INTERVAL = seconds between journeys (lower = denser traffic, clearer graphs).
 # 0.5 -> ~2-3 req/s across the fleet; override with `make traffic LOAD_INTERVAL=2`.
 LOAD_INTERVAL ?= 0.5
+# LOAD_FAIL = % of journeys the generator deliberately FAILS (ghost-VPA payments -> 4xx).
+# Default 0 = clean. Raise for a steady error baseline, or inject on demand: make fault NAME=errors.
+LOAD_FAIL ?= 0
+# LOAD_SWEEP = run the in-cluster service sweep every N cycles; 0 = OFF (the default).
+# The sweep probes every service's /{id} endpoint with a PLACEHOLDER id (CASE-0001, QR-0001, ...)
+# to keep all ~60 services reporting — but those ids don't exist, so it manufactures a steady
+# stream of lookup-miss 404s on the stub services (no 2xx value). Off by default gives a clean
+# ~96%-2xx baseline from the real portal journeys. Set LOAD_SWEEP=15 if you want every service
+# to appear on the dashboard and don't mind the baseline 404s.
+LOAD_SWEEP ?= 0
 
 traffic: ## Generate load so there is something to see (~60s)
 	$(STEP) "Drive the bankobs portal journeys for ~60s" \
-	        "INTERVAL=$(LOAD_INTERVAL) timeout 60 bash scripts/loadrunner.sh || true"
+	        "INTERVAL=$(LOAD_INTERVAL) FAIL_PCT=$(LOAD_FAIL) SWEEP_EVERY=$(LOAD_SWEEP) timeout 60 bash scripts/loadrunner.sh || true"
 
 traffic-bg: ## Keep load running in the BACKGROUND so the dashboards never go empty
 	$(STEP) "Start the loadrunner detached (writes /tmp/loadrunner.log; stop with 'make traffic-stop')" \
 	        "pkill -f '^bash scripts/loadrunner.sh' 2>/dev/null || true; sleep 1; \
-	         INTERVAL=$(LOAD_INTERVAL) nohup bash scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
-	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f '^bash scripts/loadrunner.sh' | head -1)' (INTERVAL=$(LOAD_INTERVAL)s) — tail -f /tmp/loadrunner.log'"
+	         INTERVAL=$(LOAD_INTERVAL) FAIL_PCT=$(LOAD_FAIL) SWEEP_EVERY=$(LOAD_SWEEP) nohup bash scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
+	         sleep 2; echo '  loadrunner PID '\$$(pgrep -f '^bash scripts/loadrunner.sh' | head -1)' (INTERVAL=$(LOAD_INTERVAL)s FAIL_PCT=$(LOAD_FAIL)% sweep-every=$(LOAD_SWEEP)) — tail -f /tmp/loadrunner.log'"
 
 traffic-stop: ## Stop the background loadrunner started by 'make traffic-bg'
 	$(STEP) "Stop the background loadrunner" \

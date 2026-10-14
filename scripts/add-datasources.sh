@@ -6,17 +6,18 @@
 #
 #   scripts/add-datasources.sh
 #
-# Idempotent AND uid-stable: if a datasource with the same name already exists it is UPDATED in
-# place (its uid is preserved), so re-running does not break a Golden Signals dashboard that is
-# already bound to that uid. Only a missing datasource is created fresh.
+# Besides the three datasources it also wires the trace<->logs CORRELATION so you can click
+# straight across in Explore:
+#   - Jaeger "Trace to logs"  (tracesToLogsV2) -> Loki, query {namespace="bankobs"} |= traceID
+#   - Loki  "Derived fields"  (derivedFields)  -> Jaeger, from each JSON line's "trace_id"
 #
-# The URLs are the in-cluster service names the backends install under (monitoring namespace):
-#   prometheus -> http://prometheus-server   (set as the default datasource)
+# Idempotent AND uid-stable: an existing datasource is UPDATED in place (uid preserved), so a
+# re-run never breaks a dashboard already bound to it. Only a missing datasource is created.
+#
+# In-cluster URLs (monitoring namespace):
+#   prometheus -> http://prometheus-server   (default datasource)
 #   loki       -> http://loki:3100
 #   jaeger     -> http://jaeger:16686
-# These match docs/05 and what `make golden-dashboard` expects (it binds to the default
-# Prometheus datasource). For the trace<->logs correlation links on top of these, use
-# `make correlation`.
 set -euo pipefail
 
 NS="${OBS_NS:-monitoring}"
@@ -32,17 +33,10 @@ PF=$!; trap 'kill $PF 2>/dev/null || true' EXIT
 sleep 5
 
 GRAFANA_PW="$PW" python3 - <<'PY'
-import json, os, sys, urllib.request, base64
+import json, os, base64, urllib.request, urllib.error, sys
 
 BASE = "http://localhost:3000"
 auth = "Basic " + base64.b64encode(b"admin:" + os.environ["GRAFANA_PW"].encode()).decode()
-
-# desired datasources — keep names/urls in sync with docs/05 and golden-dashboard
-WANT = [
-    {"name": "prometheus", "type": "prometheus", "access": "proxy", "url": "http://prometheus-server", "isDefault": True},
-    {"name": "loki",       "type": "loki",       "access": "proxy", "url": "http://loki:3100"},
-    {"name": "jaeger",     "type": "jaeger",      "access": "proxy", "url": "http://jaeger:16686"},
-]
 
 def call(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
@@ -57,28 +51,63 @@ def call(method, path, body=None):
     except Exception as e:
         return 0, {"message": str(e)}
 
-# map existing datasources by name
-_, existing = call("GET", "/api/datasources")
-by_name = {d["name"]: d for d in (existing if isinstance(existing, list) else [])}
+# base datasources (names/urls kept in sync with docs/05 + golden-dashboard)
+WANT = [
+    {"name": "prometheus", "type": "prometheus", "access": "proxy", "url": "http://prometheus-server", "isDefault": True},
+    {"name": "loki",       "type": "loki",       "access": "proxy", "url": "http://loki:3100"},
+    {"name": "jaeger",     "type": "jaeger",      "access": "proxy", "url": "http://jaeger:16686"},
+]
 
-rc = 0
-for ds in WANT:
-    cur = by_name.get(ds["name"])
-    if cur:  # UPDATE in place — preserve id + uid so bound dashboards keep working
+def upsert(ds, existing):
+    cur = existing.get(ds["name"])
+    if cur:
         body = {**ds, "id": cur["id"], "uid": cur["uid"]}
         st, resp = call("PUT", f"/api/datasources/uid/{cur['uid']}", body)
-        ok = st == 200
-        print(f"  {'✓' if ok else '✗'} {ds['name']:11} -> {ds['url']}  (updated, uid {cur['uid']})"
-              if ok else f"  ✗ {ds['name']}: {resp.get('message', resp)}")
-    else:    # CREATE
-        st, resp = call("POST", "/api/datasources", ds)
-        ok = st in (200, 201) and (resp.get("datasource") or resp.get("id"))
-        uid = (resp.get("datasource") or {}).get("uid", "?")
-        print(f"  {'✓' if ok else '✗'} {ds['name']:11} -> {ds['url']}  (created, uid {uid})"
-              if ok else f"  ✗ {ds['name']}: {resp.get('message', resp)}")
+        return (st == 200), cur["uid"], resp
+    st, resp = call("POST", "/api/datasources", ds)
+    uid = (resp.get("datasource") or {}).get("uid")
+    return (st in (200, 201) and bool(uid)), uid, resp
+
+# pass 1 — create/update the three base datasources
+_, existing = call("GET", "/api/datasources")
+by_name = {d["name"]: d for d in (existing if isinstance(existing, list) else [])}
+uids, rc = {}, 0
+for ds in WANT:
+    ok, uid, resp = upsert(ds, by_name)
+    uids[ds["name"]] = uid
+    print(f"  {'✓' if ok else '✗'} {ds['name']:11} -> {ds['url']}  ({'uid '+str(uid) if ok else resp.get('message', resp)})")
     rc = rc or (0 if ok else 1)
 
-print("  all datasources registered (prometheus is the default)." if rc == 0
-      else "  ⚠ one or more datasources failed — see above.")
+# pass 2 — wire the correlation now that all three uids are known
+if uids.get("jaeger") and uids.get("loki") and uids.get("prometheus"):
+    # Jaeger -> Loki  (Trace to logs)
+    jbody = {**WANT[2], "uid": uids["jaeger"],
+             "jsonData": {
+                 "tracesToLogsV2": {
+                     "datasourceUid": uids["loki"],
+                     "spanStartTimeShift": "-2m", "spanEndTimeShift": "2m",
+                     "filterByTraceID": False, "filterBySpanID": False,
+                     "customQuery": True,
+                     "query": '{namespace="bankobs"} |= "${__trace.traceId}"',
+                 }}}
+    st, _ = call("PUT", f"/api/datasources/uid/{uids['jaeger']}", jbody)
+    print(f"  {'✓' if st==200 else '✗'} jaeger  Trace-to-logs -> loki  ({'ok' if st==200 else st})")
+    rc = rc or (0 if st==200 else 1)
+
+    # Loki -> Jaeger  (Derived fields: pull trace_id out of the JSON log line)
+    lbody = {**WANT[1], "uid": uids["loki"],
+             "jsonData": {
+                 "derivedFields": [{
+                     "name": "TraceID",
+                     "matcherRegex": r'"trace_id":"(\w+)"',
+                     "url": "${__value.raw}",
+                     "datasourceUid": uids["jaeger"],
+                 }]}}
+    st, _ = call("PUT", f"/api/datasources/uid/{uids['loki']}", lbody)
+    print(f"  {'✓' if st==200 else '✗'} loki    Derived-field trace_id -> jaeger  ({'ok' if st==200 else st})")
+    rc = rc or (0 if st==200 else 1)
+
+print("  all datasources registered + trace<->logs wired (prometheus is the default)." if rc == 0
+      else "  ⚠ something failed — see above.")
 sys.exit(rc)
 PY
