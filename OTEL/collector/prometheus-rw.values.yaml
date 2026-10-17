@@ -1,22 +1,30 @@
-# Overlay applied ON TOP OF ../metrics/values.yaml to turn ON Prometheus's remote-write
-# RECEIVER. The by-hand lab's Prometheus only ever PULLS (it scrapes /metrics). In this module
-# the OTel Collector PUSHES metrics with its prometheusremotewrite exporter — and Prometheus
-# rejects remote-write unless it was started with --web.enable-remote-write-receiver.
+# Overlay applied ON TOP OF ../metrics/values.yaml to turn Prometheus from a SCRAPER into a
+# storage SINK for the OpenTelemetry Collector. Two changes:
+#
+#   1. Turn ON the remote-write RECEIVER. The by-hand lab's Prometheus only PULLS. Here the
+#      Collector's prometheusremotewrite exporter PUSHES, and Prometheus rejects remote-write
+#      unless it was started with --web.enable-remote-write-receiver.
+#
+#   2. Turn OFF Prometheus's own `bankobs-pods` scrape job. In this module the COLLECTOR scrapes
+#      every bankobs /metrics (collector/values.yaml, the `prometheus` receiver) and remote-writes
+#      the result. If Prometheus ALSO scraped the same annotated pods we would collect every
+#      series TWICE (once pulled by Prometheus, once pushed by the Collector) — so we disable the
+#      pull job and let the Collector be the single collector. (The chart drops any scrapeConfigs
+#      entry whose `enabled` is false; merged over the job from ../metrics/values.yaml this
+#      removes just that job and keeps the self-scrape.)
 #
 # Applied by `make enable-remote-write`:
 #     helm upgrade prometheus prometheus-community/prometheus -n monitoring \
 #       -f ../metrics/values.yaml -f collector/prometheus-rw.values.yaml
 #
-# We re-pass ../metrics/values.yaml so the rest of the Prometheus config (15s scrape, NodePort,
-# the bankobs scrape job) is unchanged — this overlay only adds the one flag. We keep
-# web.enable-lifecycle too (the chart's default) so `curl -X POST .../-/reload` still works.
-#
-# NOTE: this does NOT turn OFF the pull-based bankobs-pods scrape job. With this module running
-# you can end up with the SAME request metrics arriving two ways (pulled from /metrics under
-# the Python-client names AND pushed via OTLP under the OTel semconv names). That duplication
-# is itself a good teaching moment — see docs/03. To make it a clean A/B, disable scraping with
-# `make -C .. disable-annotations-to-deploy && make -C .. app` before `make app-otel`.
+# We re-pass ../metrics/values.yaml so the rest of the config (15s interval, NodePort) is
+# unchanged. web.enable-lifecycle is kept (chart default) so a config reload still works.
 server:
   extraFlags:
     - web.enable-lifecycle
     - web.enable-remote-write-receiver
+
+scrapeConfigs:
+  # Collector-scraped now, not Prometheus-scraped — disable the pull job to avoid double collection.
+  bankobs-pods:
+    enabled: false

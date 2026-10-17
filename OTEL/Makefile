@@ -21,17 +21,36 @@
 APP_NS       ?= bankobs
 OBS_NS       ?= monitoring
 COLLECTOR    ?= http://otel-collector.$(OBS_NS).svc:4317
-PARENT       ?= ..                         # the by-hand lab (reused backends live there)
+# Pin the collector CHART to match the pinned contrib IMAGE (0.102.1). The chart must NOT be
+# left floating: a newer chart auto-renames the `otlp` exporter to `otlp_grpc`, which the
+# 0.102.1 binary does not recognise -> the collector crashloops ("unknown type otlp_grpc").
+# Chart 0.93.3 ships appVersion 0.102.1 and predates that rename.
+OTEL_CHART_VER ?= 0.93.3
+# PARENT = the by-hand lab (reused backends live there). Keep the comment on its OWN line:
+# an inline "# ..." after the value makes Make keep the alignment spaces as trailing chars,
+# so $(PARENT) becomes "..<spaces>" and every $(PARENT)/path step breaks.
+PARENT       ?= ..
 
 export DRY                                 # so scripts/*.sh can see it
 SECTION := @scripts/section.sh
 STEP    := @scripts/step.sh
 
 # traffic: reuse the parent lab's load generator. Lower = denser (clearer graphs).
+# FAIL/SWEEP default to 0 so the baseline is a clean ~96% 2xx — a fault's error spike then
+# stands out instead of hiding in loadrunner's own noise.
 LOAD_INTERVAL ?= 0.5
+LOAD_FAIL     ?= 0
+LOAD_SWEEP    ?= 0
+
+# Fault + Grafana wiring is REUSED from the parent lab (same metric names/labels land in
+# Prometheus here, so the same dashboards + faultctl work unchanged).
+PARENT_SCRIPTS ?= $(PARENT)/scripts
+FAULTCTL       ?= $(PARENT)/faults/faultctl.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help backends enable-remote-write collector app-otel all \
+        grafana datasources golden-dashboard observe \
+        fault fault-stop fault-status fault-list \
         traffic traffic-bg traffic-stop verify verify-collector verify-metric-names \
         verify-logs verify-traces urls clean _url
 
@@ -50,8 +69,8 @@ backends: ## 1. Install Prometheus + Loki + Jaeger (reuses ../metrics ../logs ..
 	$(SECTION) "1" "The backends (reused)" "Same Prometheus, Loki and Jaeger as the by-hand lab. The Collector will export TO them."
 	$(STEP) "Prometheus (Helm) — the parent lab's exact values" \
 	        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1; helm repo update prometheus-community >/dev/null; helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f $(PARENT)/metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=180s"
-	$(STEP) "Loki + Promtail (Helm) — the parent lab's exact values" \
-	        "helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1; helm repo update grafana >/dev/null; helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f $(PARENT)/logs/values.yaml && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=180s"
+	$(STEP) "Loki (Helm) — WITHOUT Promtail: the Collector's filelog receiver tails logs instead" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1; helm repo update grafana >/dev/null; helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f $(PARENT)/logs/values.yaml --set promtail.enabled=false && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=180s"
 	$(STEP) "Jaeger all-in-one (Helm) + its NodePort UI — the parent lab's exact values" \
 	        "helm repo add jaegertracing https://jaegertracing.github.io/helm-charts >/dev/null 2>&1; helm repo update jaegertracing >/dev/null; helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f $(PARENT)/traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=180s && kubectl apply -f $(PARENT)/traces/jaeger-ui.yaml"
 	@echo ""
@@ -70,44 +89,94 @@ enable-remote-write: ## 2. Turn on Prometheus's remote-write RECEIVER (so OTLP m
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 3 — the OpenTelemetry Collector (the one new moving part)
 # ───────────────────────────────────────────────────────────────────────────────
-collector: ## 3. Deploy the OpenTelemetry Collector (OTLP in → Prometheus + Loki + Jaeger out)
-	$(SECTION) "3" "The OpenTelemetry Collector" "One receiver (OTLP), three exporters. The single pipeline that replaces the lab's three wirings."
+collector: ## 3. Deploy the OpenTelemetry Collector (scrape + tail + OTLP in → Prometheus + Loki + Jaeger out)
+	$(SECTION) "3" "The OpenTelemetry Collector" "ONE node-agent that COLLECTS all three signals: scrapes /metrics, tails pod logs, receives OTLP traces — replacing Prometheus's scraper AND Promtail."
 	$(STEP) "Add the OpenTelemetry Helm repo" \
 	        "helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts >/dev/null 2>&1; helm repo update open-telemetry >/dev/null"
-	$(STEP) "Install the Collector (contrib image, deployment mode) — see collector/values.yaml" \
-	        "helm upgrade --install otel-collector open-telemetry/opentelemetry-collector -n $(OBS_NS) --create-namespace -f collector/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/otel-collector --timeout=180s"
+	$(STEP) "Install the Collector (contrib image, DaemonSet node-agent) — see collector/values.yaml" \
+	        "helm upgrade --install otel-collector open-telemetry/opentelemetry-collector --version $(OTEL_CHART_VER) -n $(OBS_NS) --create-namespace -f collector/values.yaml && kubectl -n $(OBS_NS) rollout status daemonset/otel-collector-agent --timeout=180s"
 	@echo ""
-	@echo "  ✓ Collector up, listening for OTLP on otel-collector:4317 (grpc) / :4318 (http)."
-	@echo "    Watch what it does:  kubectl -n $(OBS_NS) logs -f deploy/otel-collector"
+	@echo "  ✓ Collector up (DaemonSet). It SCRAPES each bankobs /metrics, TAILS pod logs, and"
+	@echo "    receives OTLP traces on otel-collector:4317 (grpc) / :4318 (http)."
+	@echo "    Watch what it does:  kubectl -n $(OBS_NS) logs -f daemonset/otel-collector-agent"
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  SECTION 4 — point the APP at the Collector (all three signals over OTLP)
 # ───────────────────────────────────────────────────────────────────────────────
-app-otel: ## 4. Turn the SDK on and send traces+metrics+logs to the Collector
-	$(SECTION) "4" "The app, via OpenTelemetry" "One endpoint for everything. Compare: the by-hand lab needed scrape annotations, a log tailer AND a trace endpoint."
-	$(STEP) "Enable the OTel SDK and export ALL THREE signals to the Collector" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_PROTOCOL=grpc OTEL_EXPORTER_OTLP_ENDPOINT=$(COLLECTOR)"
+app-otel: ## 4. Point the app's TRACES at the Collector (metrics+logs are collected FOR the app)
+	$(SECTION) "4" "The app's traces, via the Collector" "Only traces need the app's help — the SDK emits spans. Metrics and logs the Collector collects on its own (scrape + tail), no app change."
+	$(STEP) "Turn the SDK on for traces and point OTLP at the Collector (metrics/logs exporters OFF — the Collector handles those)" \
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_PROTOCOL=grpc OTEL_EXPORTER_OTLP_ENDPOINT=$(COLLECTOR) MANAGEMENT_TRACING_ENABLED=true MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
 	@echo ""
-	@echo "  ✓ The app now speaks only OTLP, only to the Collector. Generate traffic, then verify:"
-	@echo "    make traffic  &&  make verify"
-	@echo "    ⚠ metric NAMES change with OTel (semconv, not the Python client) — see docs/03 + make verify-metric-names."
+	@echo "  ✓ Python traces → Collector :4317 (gRPC); Java/Spring traces → Collector :4318 (HTTP)."
+	@echo "    Metrics come from the Collector SCRAPING /metrics; logs from it TAILING pod logs."
+	@echo "    Generate traffic, then verify:  make traffic && make verify"
 
 all: backends enable-remote-write collector app-otel ## 1→4 in order (the whole OTel pipeline)
 	@echo ""
-	@echo "═══ Done, via OpenTelemetry. One SDK → one Collector → Prometheus + Loki + Jaeger ═══"
-	@echo "    Generate load (make traffic), then make verify. Then read docs/06 for the contrast."
+	@echo "═══ Done, via OpenTelemetry. ONE Collector → Prometheus + Loki + Jaeger ═══"
+	@echo "    Generate load (make traffic), then make verify. Then: make observe"
+	@echo "    Reminder: the bankobs pods must carry scrape annotations so the Collector can find each"
+	@echo "    /metrics — deploy the app with 'make -C .. enable-annotations-to-deploy' first (docs/00)."
+
+# ───────────────────────────────────────────────────────────────────────────────
+#  SECTION 5 — GRAFANA: one pane over the three backends (REUSED from the parent lab)
+#  The Collector preserves the Prometheus-client metric names + labels (app/status/handler),
+#  so the parent's Golden Signals + Errors dashboards and datasource wiring work unchanged.
+#  Only trace<->logs correlation differs (by service, not trace_id) — see OTEL/scripts.
+# ───────────────────────────────────────────────────────────────────────────────
+grafana: ## 5. Grafana (Helm) — same install as the parent lab (admin/admin login)
+	$(SECTION) "5" "Grafana" "A single pane over Prometheus + Loki + Jaeger — all fed by the Collector."
+	$(STEP) "Add the Grafana Helm repo" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1; helm repo update grafana >/dev/null"
+	$(STEP) "Install Grafana (parent lab's values: v13, login admin/admin)" \
+	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f $(PARENT)/grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
+	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+datasources: ## Register Prometheus+Loki+Jaeger + wire trace→logs BY SERVICE (OTEL-specific)
+	$(STEP) "Register the three datasources + trace→logs-by-service correlation (OTEL/scripts/add-datasources.sh)" \
+	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
+	@echo "  ✓ datasources added. Trace→logs opens the service's logs around the span's time"
+	@echo "    (logs carry correlation_id/k8s_container_name, not trace_id — see docs/04)."
+
+golden-dashboard: ## Apply the Golden Signals + Errors dashboards (parent lab's — names match)
+	$(STEP) "Import the Golden Signals + per-service Errors dashboards" \
+	        "bash $(PARENT_SCRIPTS)/apply-dashboard.sh $(PARENT)/grafana/golden-signals.json $(PARENT)/grafana/errors.json"
+	@echo "  ✓ open Grafana → Dashboards → 'bankobs — Golden Signals'."
+	@$(MAKE) -s _url HP=3000 NAME=Grafana
+
+observe: grafana datasources golden-dashboard ## 5 in one: Grafana + datasources + dashboards
+	@echo ""
+	@echo "═══ Grafana ready over the OTel-collected signals. Open the Golden Signals dashboard. ═══"
+
+# ───────────────────────────────────────────────────────────────────────────────
+#  FAULTS — inject observable incidents to practice the drill-down (REUSED faultctl)
+# ───────────────────────────────────────────────────────────────────────────────
+fault: ## Inject a fault:  make fault NAME=latency [TARGET=account-service]  (NAME=latency|db-down|app-down|app-crash|errors)
+	$(STEP) "Inject fault scenario: $(NAME) $(TARGET)" \
+	        "bash $(FAULTCTL) $(NAME) start $(TARGET)"
+
+fault-stop: ## Revert a fault:  make fault-stop NAME=latency [TARGET=account-service]
+	$(STEP) "Revert fault scenario: $(NAME) $(TARGET)" \
+	        "bash $(FAULTCTL) $(NAME) stop $(TARGET)"
+
+fault-status: ## Show which fault scenarios are currently active
+	@bash $(FAULTCTL) status
+
+fault-list: ## List the available fault scenarios
+	@bash $(FAULTCTL) list
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  TRAFFIC + VERIFY + URLS + CLEAN
 # ───────────────────────────────────────────────────────────────────────────────
 traffic: ## Generate load so there is something to see (~60s; reuses the parent loadrunner)
 	$(STEP) "Drive the bankobs portal journeys for ~60s" \
-	        "INTERVAL=$(LOAD_INTERVAL) timeout 60 bash $(PARENT)/scripts/loadrunner.sh || true"
+	        "INTERVAL=$(LOAD_INTERVAL) FAIL_PCT=$(LOAD_FAIL) SWEEP_EVERY=$(LOAD_SWEEP) timeout 60 bash $(PARENT)/scripts/loadrunner.sh || true"
 
 traffic-bg: ## Keep load running in the background (stop with 'make traffic-stop')
 	$(STEP) "Start the loadrunner detached (writes /tmp/loadrunner.log)" \
 	        "pkill -f '^bash [^ ]*loadrunner\.sh' 2>/dev/null || true; sleep 1; \
-	         INTERVAL=$(LOAD_INTERVAL) nohup bash $(PARENT)/scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
+	         INTERVAL=$(LOAD_INTERVAL) FAIL_PCT=$(LOAD_FAIL) SWEEP_EVERY=$(LOAD_SWEEP) nohup bash $(PARENT)/scripts/loadrunner.sh >/tmp/loadrunner.log 2>&1 & \
 	         sleep 2; echo '  loadrunner started — tail -f /tmp/loadrunner.log'"
 
 traffic-stop: ## Stop the background loadrunner
@@ -118,7 +187,7 @@ verify: verify-collector verify-metric-names verify-logs verify-traces ## Check 
 
 verify-collector: ## Is the Collector accepting OTLP and exporting? (its self-telemetry on :8888)
 	$(STEP) "Ask the Collector how many spans/metrics/logs it has accepted + exported" \
-	  "kubectl -n $(OBS_NS) port-forward deploy/otel-collector 8888:8888 >/dev/null 2>&1 & PF=$$!; sleep 4; \
+	  "kubectl -n $(OBS_NS) port-forward daemonset/otel-collector-agent 8888:8888 >/dev/null 2>&1 & PF=$$!; sleep 4; \
 	   echo '  accepted/exported (non-zero = flowing):'; \
 	   curl -s http://localhost:8888/metrics | grep -E 'otelcol_receiver_accepted|otelcol_exporter_sent' | grep -vE '^#' | sed 's/^/    /' | head -20; \
 	   kill $$PF 2>/dev/null || true"

@@ -26,6 +26,7 @@ LOADRUNNER="$ROOT/scripts/loadrunner.sh"
 DEF_APP="insurance-service"     # a graceful Python service, safe to crash/stop
 DEF_DB="mongodb"                # a datastore, safe to bounce
 DEF_LAT="account-service"       # core service on the payment path; its p95 visibly climbs under delay
+DEF_DBLAT="oracle"              # core-banking datastore with real traffic; slowing it slows account-service
 
 c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_cyn=$'\033[1;36m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 say()  { printf '%s%s%s\n' "$c_cyn" "$*" "$c_off"; }
@@ -52,18 +53,21 @@ faultctl.sh — observable fault scenarios for the bankobs lab
 scenarios:
   app-down   [svc]   Scale a service to 0.  TARGET=upi-service -> real 5xx (ERR_UPSTREAM) on
                      payment-gateway/gateway-service.               default: $DEF_APP
-  latency    [svc]   Inject network delay (default 800ms).  p95 of the service climbs; traces
+  latency    [svc]   Inject network delay (default 1500ms).  p95 of the service climbs; traces
                      show the slow span.   LAT_MS=2000 to tune.      default: $DEF_LAT
+  db-latency [db]    Slow a DATASTORE (default 1200ms) — the services that query it get slow
+                     (account-service most). A slow DB, not a dead one.  LAT_MS tunes. default: $DEF_DBLAT
   app-crash  [svc]   CrashLoop a service (pod up, un-scrapable)   -> up == 0        default: $DEF_APP
   db-down    [db]    Scale a datastore statefulset to 0           -> db up == 0     default: $DEF_DB
   errors     [pct]   Drive a real 4xx error SPIKE (load failures) -> 4xx rate up    default: 50
 
-the two demo scenarios:
-  faults/faultctl.sh app-down start upi-service      # 5xx incident  -> payment-gateway/gateway 5xx
-  faults/faultctl.sh latency  start                  # latency incident -> account-service p95 up
-  faults/faultctl.sh app-down stop upi-service
-  faults/faultctl.sh latency  stop
+the two demo scenarios (observable via the Golden Signals LATENCY panel):
+  faults/faultctl.sh latency    start                # slow SERVICE   -> account-service's own span is slow
+  faults/faultctl.sh db-latency start                # slow DATABASE  -> account-service slow because its DB waits
+  faults/faultctl.sh latency    stop
+  faults/faultctl.sh db-latency stop
   faults/faultctl.sh status
+  (app-down/db-down also exist, but bankobs degrades gracefully — no clean error spike; see docs.)
 TXT
 }
 
@@ -162,6 +166,44 @@ latency)
       kubectl -n "$NS" delete pod -l app="$t" --wait=false >/dev/null 2>&1 || true
       kubectl -n "$NS" rollout status deploy/"$t" --timeout=120s >/dev/null 2>&1 || true
       ok "$t pod recreated — netem gone" ;;
+    *) usage; exit 2 ;;
+  esac ;;
+# ────────────────────────────────────────────────────────────────── db-latency ──
+# A SLOW DATABASE, not a dead one. bankobs absorbs a DB *outage* gracefully (reads fall back to
+# cache, writes degrade to handled 4xx — no visible error spike), so "db-down" is a poor teacher.
+# A slow DB is the opposite: every query that misses the cache WAITS, so the services that read
+# the DB get slow — their p95 climbs while Saturation stays flat. This is the DB counterpart to
+# the `latency` scenario: same tc-netem mechanism, but on the DATASTORE pod, so the delay is
+# shared by everything that queries it.
+#
+# Default target is `oracle` — bankobs's core-banking datastore, and the DB with real portal
+# traffic on it (account-service's balance/account journeys), so its p95 climb is the clear,
+# reliable signal. Revert clears the qdisc IN PLACE (tc qdisc del) — no DB restart.
+db-latency)
+  t="${target:-$DEF_DBLAT}"
+  ms="${LAT_MS:-1200}"
+  case "$action" in
+    start)
+      say "db-latency: adding a ${ms}ms tc-netem delay to datastore '$t' (every query waits)"
+      pod=$(kubectl -n "$NS" get pod -l app="$t" --field-selector=status.phase=Running -o name 2>/dev/null | head -1 | sed 's#pod/##')
+      [ -n "$pod" ] || { echo "✗ no running pod for datastore '$t'"; exit 1; }
+      kubectl -n "$NS" debug "$pod" --image=nicolaka/netshoot:latest --profile=netadmin -q -- \
+        tc qdisc add dev eth0 root netem delay "${ms}ms" >/dev/null 2>&1
+      ok "'$t' is now ${ms}ms slow — every query to it waits"
+      hint "Golden Signals Latency: set Service=account-service -> p95 climbs to ~${ms}ms+ (its DB reads now wait)"
+      hint "Saturation stays flat -> it's WAIT on the DB, not CPU. Jaeger: account-service's span is the long one"
+      hint "Logs (Loki {k8s_container_name=\"account-service\"}): slow-query / Hikari waits around that time = the DB is the cause"
+      hint "tune:  LAT_MS=3000 make fault NAME=db-latency TARGET=$t" ;;
+    stop)
+      say "db-latency: clearing the netem delay on datastore '$t' (in place — no DB restart)"
+      pod=$(kubectl -n "$NS" get pod -l app="$t" --field-selector=status.phase=Running -o name 2>/dev/null | head -1 | sed 's#pod/##')
+      if [ -n "$pod" ]; then
+        kubectl -n "$NS" debug "$pod" --image=nicolaka/netshoot:latest --profile=netadmin -q -- \
+          tc qdisc del dev eth0 root >/dev/null 2>&1 || true
+        ok "'$t' netem cleared — the DB kept running throughout"
+      else
+        echo "  (no running pod for '$t' — nothing to clear)"
+      fi ;;
     *) usage; exit 2 ;;
   esac ;;
 # ──────────────────────────────────────────────────────────────────── status ──

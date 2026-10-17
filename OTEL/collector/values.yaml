@@ -1,49 +1,72 @@
 # Helm values for the OpenTelemetry Collector (chart: open-telemetry/opentelemetry-collector).
 # This ONE agent is the whole difference between this module and the by-hand lab.
 #
-#   by-hand lab:  app ──/metrics──▶ Prometheus (pull)
+#   by-hand lab:  app ──/metrics──▶ Prometheus (Prometheus PULLS)
 #                 node logs ──Promtail──▶ Loki
 #                 app ──OTLP──▶ Jaeger
-#                 → three mechanisms, three wirings.
+#                 → three separate agents/mechanisms, three wirings.
 #
-#   this module:  app ──OTLP (all 3 signals)──▶ [ OTel Collector ] ──▶ Prometheus
-#                                                                   ├─▶ Loki
-#                                                                   └─▶ Jaeger
-#                 → one SDK, one wire, one place to change where signals go.
+#   this module:  bankobs pods ─/metrics (scrape)─┐
+#                 node pod logs ─(tail)───────────┤─▶ [ OTel Collector ] ─▶ Prometheus (remote-write)
+#                 app ─OTLP traces───────────────┘                        ├─▶ Loki
+#                                                                          └─▶ Jaeger
+#                 → ONE Collector collects all three signals and fans them out.
 #
-# We deploy in `deployment` mode (a single Deployment, not a per-node DaemonSet) because the
-# app pushes to it over the network — it does not need to be on every node.
+# WHY THE COLLECTOR DOES THE COLLECTING (and not the app's SDK):
+#   The bankobs app emits *traces* through the OTel SDK, but it does NOT emit OTel metrics or
+#   OTel logs — it exposes Prometheus-client `/metrics` and writes JSON logs to stdout (the same
+#   surfaces the by-hand lab consumed). So the honest, real-world way to "collect all three with
+#   OpenTelemetry" here is to let the COLLECTOR collect them: a `prometheus` receiver scrapes
+#   /metrics, a `filelog` receiver tails the pod logs, and the `otlp` receiver takes the traces.
+#   One component replaces Prometheus's scraper AND Promtail — that is the OTel Collector pitch.
 #
-# IMPORTANT — we use the CONTRIB image. The `prometheusremotewrite` and `loki` exporters live
-# in opentelemetry-collector-contrib, not in the core image. `command.name` must therefore be
-# otelcol-contrib (the chart's default command targets the core binary).
+# DAEMONSET (node agent). The `filelog` receiver reads node-local pod log files, so the Collector
+# must run on every node — hence `mode: daemonset`, not a single Deployment. (This kind cluster
+# has one node, so that is one pod; the shape is what matters.) The Service `otel-collector`
+# still fronts :4317/:4318 for the app's OTLP traces.
+#
+# CONTRIB image: the `prometheusremotewrite` and `loki` exporters live in
+# opentelemetry-collector-contrib, not the core image. `command.name` is otelcol-contrib.
+#
+# CHART PINNED in the Makefile (OTEL_CHART_VER=0.93.3 → appVersion 0.102.1). A floating chart
+# auto-renames the `otlp` exporter to `otlp_grpc`, which the pinned 0.102.1 binary rejects.
 
-mode: deployment
-replicaCount: 1
-fullnameOverride: otel-collector     # -> Service "otel-collector" in the monitoring namespace
+mode: daemonset
+fullnameOverride: otel-collector     # -> DaemonSet "otel-collector-agent"; Service "otel-collector"
+
+# In daemonset mode the chart does NOT create a Service by default (node agents normally use a
+# hostPort). We DO want a stable Service so the app can send OTLP traces to
+# otel-collector.monitoring.svc:4317 regardless of which node the agent is on.
+service:
+  enabled: true
 
 image:
   repository: otel/opentelemetry-collector-contrib
   # Pinned deliberately: the `loki` exporter was DEPRECATED and later REMOVED from contrib.
   # 0.102.1 still ships it, which we need because the lab's Loki is 2.9.8 (no native OTLP
-  # ingest — that is Loki 3.x). If you move to Loki 3.x, you can drop to a newer collector and
-  # swap the `loki` exporter for a plain `otlphttp` to http://loki:3100/otlp. See docs/04.
+  # ingest — that is Loki 3.x). If you move to Loki 3.x, drop the `loki` exporter for a plain
+  # otlphttp to http://loki:3100/otlp and you can use a newer collector. See docs/04.
   tag: "0.102.1"
 command:
   name: otelcol-contrib
 
-# This lab defines the whole pipeline itself — no chart presets injecting extra processors.
+# Presets do the fiddly wiring for two of the three receivers:
+#   kubernetesAttributes → the k8sattributes processor + the RBAC (pods/namespaces get,list,watch)
+#                          so every signal is stamped with k8s.pod.name / k8s.namespace.name etc.
+#   logsCollection       → the `filelog` receiver + the hostPath mounts (/var/log/pods) it needs,
+#                          AND it adds filelog to the logs pipeline for us.
+# hostMetrics stays off (we are not teaching node metrics here).
 presets:
-  kubernetesAttributes: { enabled: false }   # see docs/03 for how to turn this on (adds RBAC)
-  logsCollection:        { enabled: false }   # we receive logs over OTLP, we do not tail files
+  kubernetesAttributes: { enabled: true }
+  logsCollection:        { enabled: true, includeCollectorLogs: false }
   hostMetrics:           { enabled: false }
 
 resources:
   requests: { cpu: 100m, memory: 256Mi }
   limits:   { memory: 1Gi }
 
-# The OTLP receiver ports the app exports to. (Chart enables these by default; pinned here so
-# the intent is explicit and the Service publishes 4317/4318.)
+# OTLP receiver ports the app's traces arrive on. (Chart enables these by default; pinned here
+# so the Service publishes 4317/4318 explicitly.)
 ports:
   otlp:
     enabled: true
@@ -60,14 +83,53 @@ ports:
 
 config:
   receivers:
-    # ONE door for everything the app sends: traces + metrics + logs, all over OTLP.
+    # 1) TRACES — the app's OTel SDK pushes spans here over OTLP.
     otlp:
       protocols:
         grpc: { endpoint: 0.0.0.0:4317 }
         http: { endpoint: 0.0.0.0:4318 }
 
+    # 2) METRICS — the Collector SCRAPES each bankobs pod's /metrics, exactly the way the
+    #    by-hand Prometheus did (same annotation discovery + relabels), but now it is the
+    #    COLLECTOR pulling, then remote-writing onward. Metric NAMES stay the Prometheus-client
+    #    names (http_requests_total, http_server_requests_total, ..._duration_seconds_*) and the
+    #    `app` / `status` / `handler` labels are preserved — so the parent Golden Signals
+    #    dashboards work unchanged. Prometheus's own bankobs scrape is turned OFF
+    #    (collector/prometheus-otel.values.yaml) so nothing is collected twice.
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: bankobs-pods
+            scrape_interval: 15s
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_namespace]
+                action: keep
+                regex: bankobs
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: "true"
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                target_label: __address__
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+              - source_labels: [__meta_kubernetes_pod_label_app]
+                target_label: app
+              - source_labels: [__meta_kubernetes_pod_label_domain]
+                target_label: domain
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: pod
+
   processors:
-    # memory_limiter MUST be first so it can shed load before the batch processor buffers.
+    # memory_limiter MUST be first so it can shed load before batch buffers.
     memory_limiter:
       check_interval: 5s
       limit_percentage: 80
@@ -75,37 +137,45 @@ config:
     batch:
       timeout: 5s
       send_batch_size: 1024
-    # stamp a static attribute on every signal — the OTel equivalent of the by-hand lab's
-    # relabel_configs adding `namespace`/`domain`. (For real pod/node/namespace attributes,
-    # add the k8sattributes processor — see docs/03; it needs RBAC, hence left out by default.)
+    # one static attribute on every signal (the OTel equivalent of the by-hand relabel that
+    # stamped `namespace`). Real pod/node attributes come from the k8sattributes preset above.
     resource:
       attributes:
         - { key: deployment.environment, value: training, action: upsert }
+        # LOKI STREAM LABELS. Loki rejects a push with no labels ("at least one label pair is
+        # required per stream"). The filelog receiver's `container` operator already parses
+        # k8s.namespace.name / k8s.pod.name / k8s.container.name off each log file's path; this
+        # hint tells the `loki` exporter to promote them to Loki stream labels. k8s_container_name
+        # is the service name (e.g. account-service), which is what the trace→logs drill selects on.
+        - { key: loki.resource.labels, value: "k8s.namespace.name, k8s.container.name, k8s.pod.name", action: insert }
 
   exporters:
-    # TRACES → the existing Jaeger all-in-one's native OTLP receiver (same target the by-hand
-    # lab points the app at — here the COLLECTOR points at it instead of the app).
+    # TRACES → the existing Jaeger all-in-one's native OTLP receiver.
     otlp/jaeger:
       endpoint: jaeger-collector.monitoring.svc:4317
       tls: { insecure: true }
 
-    # METRICS → PUSH to Prometheus via remote-write. This is the semantic opposite of the
-    # by-hand lab (there Prometheus PULLED /metrics). It needs Prometheus started with
-    # --web.enable-remote-write-receiver (see collector/prometheus-rw.values.yaml +
-    # `make enable-remote-write`). resource_to_telemetry_conversion turns OTel resource
-    # attributes into Prometheus labels so you can group series by service.
+    # METRICS → PUSH to Prometheus via remote-write (needs --web.enable-remote-write-receiver;
+    # see `make enable-remote-write`). We do NOT turn on resource_to_telemetry_conversion:
+    # the per-series labels we care about (app/status/handler) are already datapoint labels from
+    # the scrape, and converting resource attrs would also fold k8s.* attributes onto every
+    # series. target_info carries the resource attributes instead.
     prometheusremotewrite:
       endpoint: http://prometheus-server.monitoring.svc/api/v1/write
       tls: { insecure: true }
-      resource_to_telemetry_conversion: { enabled: true }
 
-    # LOGS → Loki's push API. (Loki 2.9.8 has no OTLP endpoint, so we use the contrib `loki`
-    # exporter, which speaks Loki's own push protocol. On Loki 3.x use otlphttp instead.)
+    # LOGS → Loki's push API. (Loki 2.9.8 has no OTLP endpoint, so the contrib `loki` exporter,
+    # which speaks Loki's push protocol.) Promote a couple of resource attrs to Loki stream
+    # labels so you can select by service in Explore ( {app="account-service"} ).
     loki:
       endpoint: http://loki.monitoring.svc:3100/loki/api/v1/push
+      # Stream labels come from the loki.resource.labels hint set in the resource processor.
+      default_labels_enabled:
+        exporter: false
+        job: false
 
-    # Prints a one-line summary of every batch to the collector's own logs — your first stop
-    # when something is not arriving ( kubectl -n monitoring logs deploy/otel-collector ).
+    # one-line summary of every batch in the collector's own logs — first stop when something
+    # is not arriving ( kubectl -n monitoring logs daemonset/otel-collector ).
     debug:
       verbosity: basic
 
@@ -113,18 +183,20 @@ config:
     telemetry:
       metrics:
         address: 0.0.0.0:8888
-    # THREE pipelines, ONE receiver. Change a backend here, in one place, and the app never
-    # knows — that is the whole pitch of the Collector.
+    # THREE pipelines, ONE Collector. Each pillar enters through its own receiver and leaves
+    # through its own exporter — change a backend here, in one place, and nothing else moves.
+    # (The logsCollection preset adds the `filelog` receiver to the logs pipeline; the
+    # kubernetesAttributes preset adds `k8sattributes` to all three.)
     pipelines:
       traces:
         receivers:  [otlp]
         processors: [memory_limiter, resource, batch]
         exporters:  [otlp/jaeger, debug]
       metrics:
-        receivers:  [otlp]
+        receivers:  [prometheus]
         processors: [memory_limiter, resource, batch]
-        exporters:  [prometheusremotewrite, debug]
+        exporters:  [prometheusremotewrite]
       logs:
-        receivers:  [otlp]
+        receivers:  [filelog]
         processors: [memory_limiter, resource, batch]
-        exporters:  [loki, debug]
+        exporters:  [loki]
