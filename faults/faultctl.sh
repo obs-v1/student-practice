@@ -156,9 +156,9 @@ latency)
         tc qdisc add dev eth0 root netem delay "${ms}ms" >/dev/null 2>&1
       ok "$t's network is now delayed ~${ms}ms (every in/out call waits)"
       hint "If $t is a LEAF (e.g. account-service): Golden Latency Service=$t -> its p95 climbs to ~${ms}ms+"
-      hint "If $t is a DOWNSTREAM dep (e.g. eligibility-engine): its CALLER's p95 climbs (loan-origination -> ~3s),"
-      hint "   but $t's OWN p95 stays flat (the wire delay is client-side) — the Jaeger trace shows the caller"
-      hint "   WAITING on the call to $t: that is the real culprit the per-service metric hides."
+      hint "If $t is a DOWNSTREAM dep (e.g. eligibility-engine): its CALLER's p99 climbs (loan-origination -> ~3-5s;"
+      hint "   p95 may stay low — only the calls reaching $t are slow, so it's a TAIL latency), while $t's OWN p95"
+      hint "   stays flat (client-side wire delay). The Jaeger trace shows the caller WAITING on the call to $t."
       hint "Saturation stays flat -> it's WAIT, not CPU/mem.   tune: LAT_MS=3000 make fault NAME=latency TARGET=$t" ;;
     stop)
       say "latency: clearing the netem delay on $t (recreating its pod)"

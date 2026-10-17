@@ -60,10 +60,13 @@ we slow one of those dependencies, `eligibility-engine`.
 make -C OTEL fault NAME=latency TARGET=eligibility-engine
 ```
 
-1. **Metrics — Golden Signals.** Set **Service = `loan-origination`** (the *caller*). Its **p95
-   jumps from ~25 ms to ~3.4 s** — loan-origination looks broken. Errors flat, Saturation flat.
-   **Now set Service = `eligibility-engine`** (the service you just broke): its p95 looks
-   **perfectly healthy (~95 ms)**. The dashboard is pointing you at the wrong service.
+1. **Metrics — Golden Signals.** Set **Service = `loan-origination`** (the *caller*). Watch the
+   **p99** line on the Latency panel — it **spikes to ~3–5 s**. (p50/p95 may stay low: only the
+   `/api/loans/apply` calls that reach the slowed dependency are slow, so the pain lives in the
+   **tail** — a real tail-latency incident. The panel plots p50/p95/**p99**, so the p99 line is
+   your signal.) **Now set Service = `eligibility-engine`** (the service you just broke): its
+   latency looks **perfectly healthy (~95 ms)**. The dashboard is pointing you at the wrong
+   service, and even then only in the tail.
 2. **Traces — Jaeger (this is the key step).** Open a slow `loan-origination` trace
    (`/api/loans/apply`, ~3 s). The waterfall shows loan-origination's time is spent
    **waiting on its call to `eligibility-engine`** (that span is the long one) — while
@@ -88,7 +91,7 @@ only *looks* slow because it waits on it.
 
 | Pillar | Question it answers | Drill 1 (slow service) | Drill 2 (slow dependency) |
 |---|---|---|---|
-| **Metrics** (Golden Latency) | *is* something wrong, **which** service looks bad? | account-service | loan-origination (the caller) |
+| **Metrics** (Golden Latency) | *is* something wrong, **which** service looks bad? | account-service (p95) | loan-origination caller (p99 tail) |
 | **Traces** (Jaeger) | **where** is the time *really* spent? | account-service's own span | the call **to** eligibility-engine |
 | **Logs** (Loki) | **why** — any errors? | none (pure latency) | none (pure latency) |
 
