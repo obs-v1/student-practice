@@ -49,9 +49,9 @@ Collector and reverts the app; the backends stay.
 The two incident drills (both read from the Golden Signals **Latency** panel):
 
 ```bash
-make -C OTEL fault NAME=latency                      # Drill 1 — slow SERVICE (account-service is the culprit)
-make -C OTEL fault NAME=latency TARGET=aadhaar-adapter # Drill 2 — slow DOWNSTREAM dep: kyc-service p95 spikes,
-                                                     #           the trace blames aadhaar-adapter (fault-stop to revert)
+make -C OTEL fault NAME=latency                          # Drill 1 — slow SERVICE (account-service is the culprit)
+make -C OTEL fault NAME=latency TARGET=eligibility-engine # Drill 2 — slow DOWNSTREAM dep: loan-origination p95 spikes,
+                                                         #           the trace blames eligibility-engine (fault-stop to revert)
 ```
 
 ## How this differs from the by-hand lab, per pillar

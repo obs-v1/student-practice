@@ -52,9 +52,9 @@ Expect dozens of services. Open Jaeger (`make -C OTEL urls`) and search one — 
 spans as the by-hand lab, just arriving via the Collector.
 
 > **Heads-up for the drills:** traces here are HTTP server + client spans across services (e.g.
-> `kyc-service` → `aadhaar-adapter`). That cross-service linking is exactly what Drill 2 relies
-> on — a slow downstream dependency shows up as a long **call span** in the caller's trace, even
-> though the dependency's own `/metrics` looks healthy. There are no JDBC/DB child spans (the app
-> doesn't instrument the database layer). See [06](06-incident-drills.md).
+> `loan-origination` → `eligibility-engine`). That cross-service linking is exactly what Drill 2
+> relies on — a slow downstream dependency shows up as a long **call span** in the caller's trace,
+> even though the dependency's own `/metrics` looks healthy. There are no JDBC/DB child spans (the
+> app doesn't instrument the database layer). See [06](06-incident-drills.md).
 
 ➡ Next: [05-grafana.md](05-grafana.md)

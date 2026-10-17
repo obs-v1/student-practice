@@ -60,10 +60,10 @@ scenarios:
   errors     [pct]   Drive a real 4xx error SPIKE (load failures) -> 4xx rate up    default: 50
 
 the two demo scenarios (observable via the Golden Signals LATENCY panel):
-  faults/faultctl.sh latency start                   # slow SERVICE   -> account-service's own span is slow
-  faults/faultctl.sh latency start aadhaar-adapter   # slow DOWNSTREAM-> kyc-service (caller) p95 climbs; trace blames aadhaar
+  faults/faultctl.sh latency start                     # slow SERVICE   -> account-service's own span is slow
+  faults/faultctl.sh latency start eligibility-engine  # slow DOWNSTREAM-> loan-origination (caller) p95 ~3s; trace blames eligibility-engine
   faults/faultctl.sh latency stop
-  faults/faultctl.sh latency stop aadhaar-adapter
+  faults/faultctl.sh latency stop eligibility-engine
   faults/faultctl.sh status
   (app-down/db-down also exist, but bankobs degrades gracefully — no clean error spike; see docs.)
 TXT
@@ -156,7 +156,7 @@ latency)
         tc qdisc add dev eth0 root netem delay "${ms}ms" >/dev/null 2>&1
       ok "$t's network is now delayed ~${ms}ms (every in/out call waits)"
       hint "If $t is a LEAF (e.g. account-service): Golden Latency Service=$t -> its p95 climbs to ~${ms}ms+"
-      hint "If $t is a DOWNSTREAM dep (e.g. aadhaar-adapter): its CALLER's p95 climbs (kyc-service -> ~10s),"
+      hint "If $t is a DOWNSTREAM dep (e.g. eligibility-engine): its CALLER's p95 climbs (loan-origination -> ~3s),"
       hint "   but $t's OWN p95 stays flat (the wire delay is client-side) — the Jaeger trace shows the caller"
       hint "   WAITING on the call to $t: that is the real culprit the per-service metric hides."
       hint "Saturation stays flat -> it's WAIT, not CPU/mem.   tune: LAT_MS=3000 make fault NAME=latency TARGET=$t" ;;

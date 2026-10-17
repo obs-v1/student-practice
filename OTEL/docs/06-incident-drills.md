@@ -50,36 +50,37 @@ make -C OTEL fault NAME=latency
 
 ## Drill 2 — a slow downstream dependency (the slow service is a victim)
 
-Now slow a **downstream** service that another service **calls**. `kyc-service` calls
-`aadhaar-adapter` (and `pan-adapter`) to verify identity; we slow the adapter.
+Now slow a **downstream** service that another service **calls**. `loan-origination` orchestrates
+a loan application by fanning out to `eligibility-engine`, `kyc-service` and `account-service`;
+we slow one of those dependencies, `eligibility-engine`.
 
-**Inject** (1500 ms `tc-netem` on `aadhaar-adapter`):
+**Inject** (1500 ms `tc-netem` on `eligibility-engine`):
 
 ```bash
-make -C OTEL fault NAME=latency TARGET=aadhaar-adapter
+make -C OTEL fault NAME=latency TARGET=eligibility-engine
 ```
 
-1. **Metrics — Golden Signals.** Set **Service = `kyc-service`** (the *caller*). Its **p95
-   explodes to ~10 s** — kyc-service looks broken. Errors flat, Saturation flat.
-   **Now set Service = `aadhaar-adapter`** (the service you just broke): its p95 looks
-   **perfectly healthy (~90 ms)**. The dashboard is pointing you at the wrong service.
-2. **Traces — Jaeger (this is the key step).** Open a slow `kyc-service` trace
-   (`/api/v1/kyc/{id}/verify`, ~9 s). The waterfall shows kyc-service's time is spent
-   **waiting on its call to `aadhaar-adapter`** (that span is ~4–5 s) — while
-   `aadhaar-adapter`'s *own* server span is **~0 ms**. The trace fingers the dependency that
+1. **Metrics — Golden Signals.** Set **Service = `loan-origination`** (the *caller*). Its **p95
+   jumps from ~25 ms to ~3.4 s** — loan-origination looks broken. Errors flat, Saturation flat.
+   **Now set Service = `eligibility-engine`** (the service you just broke): its p95 looks
+   **perfectly healthy (~95 ms)**. The dashboard is pointing you at the wrong service.
+2. **Traces — Jaeger (this is the key step).** Open a slow `loan-origination` trace
+   (`/api/loans/apply`, ~3 s). The waterfall shows loan-origination's time is spent
+   **waiting on its call to `eligibility-engine`** (that span is the long one) — while
+   `eligibility-engine`'s *own* server span is **~0 ms**. The trace fingers the dependency that
    the per-service metric hid.
 
-   > Why the adapter's own metric looks fine: the netem delay is on the **wire**, so the adapter
-   > finishes fast and the bytes arrive at the caller slowly. Server-side timing (its `/metrics`)
-   > never sees the delay; the caller's trace span does. Distributed tracing is what makes the
-   > real culprit visible.
-3. **Logs — Loki.** `{k8s_container_name="kyc-service"}`: no errors (it's waiting, not failing).
-   `{k8s_container_name="aadhaar-adapter"}`: also clean. Logs confirm "nobody is erroring" —
-   consistent with a pure latency/dependency problem.
+   > Why the dependency's own metric looks fine: the netem delay is on the **wire**, so
+   > eligibility-engine finishes fast and the bytes arrive at the caller slowly. Server-side
+   > timing (its `/metrics`) never sees the delay; the caller's trace span does. Distributed
+   > tracing is what makes the real culprit visible.
+3. **Logs — Loki.** `{k8s_container_name="loan-origination"}`: no errors (it's waiting, not
+   failing). `{k8s_container_name="eligibility-engine"}`: also clean. Logs confirm "nobody is
+   erroring" — consistent with a pure latency/dependency problem.
 
-**Root cause:** the downstream `aadhaar-adapter` (the hop to it) is slow; `kyc-service` only
-*looks* slow because it waits on it.
-**Revert:** `make -C OTEL fault-stop NAME=latency TARGET=aadhaar-adapter`
+**Root cause:** the downstream `eligibility-engine` (the hop to it) is slow; `loan-origination`
+only *looks* slow because it waits on it.
+**Revert:** `make -C OTEL fault-stop NAME=latency TARGET=eligibility-engine`
 
 ---
 
@@ -87,8 +88,8 @@ make -C OTEL fault NAME=latency TARGET=aadhaar-adapter
 
 | Pillar | Question it answers | Drill 1 (slow service) | Drill 2 (slow dependency) |
 |---|---|---|---|
-| **Metrics** (Golden Latency) | *is* something wrong, **which** service looks bad? | account-service | kyc-service (the caller) |
-| **Traces** (Jaeger) | **where** is the time *really* spent? | account-service's own span | the call **to** aadhaar-adapter |
+| **Metrics** (Golden Latency) | *is* something wrong, **which** service looks bad? | account-service | loan-origination (the caller) |
+| **Traces** (Jaeger) | **where** is the time *really* spent? | account-service's own span | the call **to** eligibility-engine |
 | **Logs** (Loki) | **why** — any errors? | none (pure latency) | none (pure latency) |
 
 The lesson: the Golden Signals tell you *a* service is slow, but when that service is just
