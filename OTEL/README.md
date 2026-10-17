@@ -1,98 +1,77 @@
-# OTEL — the three pillars, wired through OpenTelemetry
+# OTEL — the three pillars, collected by OpenTelemetry
 
 This is the **counterpart** to the parent [`student-practice`](../README.md) lab. The parent
-builds metrics, logs and traces **by hand** — three separate mechanisms, no Collector. This
-module keeps the *exact same backends* (Prometheus, Loki, Jaeger) but the app emits **all three
-signals** through the OpenTelemetry SDK over OTLP to **one** OpenTelemetry Collector, which fans
-them out.
-
-The point of the whole module is the contrast:
+builds metrics, logs and traces **by hand** — three separate mechanisms (Prometheus scrape,
+Promtail, app→Jaeger). This module keeps the *exact same backends* (Prometheus, Loki, Jaeger) but
+puts **one OpenTelemetry Collector** in the middle, so a single component collects all three
+signals and fans them out.
 
 ```mermaid
 flowchart LR
-  subgraph app["bankobs app (OTel SDK on)"]
-    A["traces + metrics + logs"]
+  subgraph app["bankobs pods"]
+    M["/metrics (Prometheus client)"]; L["stdout JSON logs"]; T["OTel SDK traces"]
   end
-  A -- "OTLP :4317" --> C["OpenTelemetry\nCollector"]
-  C -- "remote-write" --> P["Prometheus"]
-  C -- "loki push" --> L["Loki"]
-  C -- "OTLP" --> J["Jaeger"]
-  P --> G["Grafana"]
-  L --> G
-  J --> G
+  M -- scrape --> C["OpenTelemetry Collector\n(DaemonSet)"]
+  L -- "tail (filelog)" --> C
+  T -- "OTLP :4317/:4318" --> C
+  C -- remote-write --> P["Prometheus"]
+  C -- "loki push" --> K["Loki"]
+  C -- OTLP --> J["Jaeger"]
+  P --> G["Grafana"]; K --> G; J --> G
 ```
 
-Compare the by-hand lab, where the three pillars never share a wire:
-
-```mermaid
-flowchart LR
-  A2["bankobs app"] -- "/metrics (pull)" --> P2["Prometheus"]
-  N["pod log files"] -- "Promtail tails" --> L2["Loki"]
-  A2 -- "OTLP direct" --> J2["Jaeger"]
-```
-
-**One SDK, one wire, one place to change where signals go** — that is the OpenTelemetry pitch,
-and running both labs back to back is how it lands.
+**The honest shape:** bankobs emits OTel **traces**, but exposes a Prometheus-client `/metrics`
+and writes JSON logs to stdout — it does *not* emit OTel metrics or logs. So the **Collector does
+the collecting**: a `prometheus` receiver **scrapes** `/metrics`, a `filelog` receiver **tails**
+pod logs, and the `otlp` receiver takes the traces. One Collector replaces Prometheus's scraper
+*and* Promtail. **One wire, one place to change where any signal goes** — that is the pitch.
 
 ## Run it
 
-Assumes the parent lab's **cluster + bankobs app are already up** (`make -C .. cluster && make -C .. app`).
+Assumes the parent lab's **cluster + bankobs app are up** — and, for the Collector to find each
+`/metrics`, that the app was deployed **with scrape annotations**:
 
 ```bash
-make backends            # Prometheus + Loki + Jaeger  (reuses ../metrics ../logs ../traces)
-make enable-remote-write # flip ONE flag so Prometheus accepts PUSHED metrics
-make collector           # the OpenTelemetry Collector  (collector/values.yaml)
-make app-otel            # point the app's OTLP (all 3 signals) at the Collector
-# ── or all four at once ──
-make all
+# on the lab box, from ~/student-practice:
+make enable-annotations-to-deploy    # so the Collector can discover each service's /metrics
+make -C bankobs deploy               # (if not already) deploy the app with annotations baked in
 
-make traffic             # generate load  (make traffic-bg to keep it running)
-make verify              # collector flowing? metric names? logs + traces landing?
-make urls                # UI links
+make -C OTEL all                     # backends + remote-write + Collector + app traces
+make -C OTEL observe                 # Grafana (admin/admin) + datasources + Golden/Errors dashboards
+make -C OTEL traffic-bg              # steady load
+make -C OTEL verify                  # Collector flowing? metric names? logs + traces landing?
+make -C OTEL urls                    # UI links
 ```
 
-`DRY=1 make <target>` prints each step without running it (do-it-by-hand mode), same as the
-parent lab. `make clean` removes the Collector and reverts the app; the backends stay (use
-`make -C .. clean` to remove them).
+`DRY=1 make <target>` prints each step without running it. `make -C OTEL clean` removes the
+Collector and reverts the app; the backends stay.
 
-## How this differs from the by-hand lab, at each pillar
+The two incident drills (both read from the Golden Signals **Latency** panel):
+
+```bash
+make -C OTEL fault NAME=latency                      # Drill 1 — slow SERVICE (account-service is the culprit)
+make -C OTEL fault NAME=latency TARGET=aadhaar-adapter # Drill 2 — slow DOWNSTREAM dep: kyc-service p95 spikes,
+                                                     #           the trace blames aadhaar-adapter (fault-stop to revert)
+```
+
+## How this differs from the by-hand lab, per pillar
 
 | Pillar | By-hand lab | This module (OTel) |
 |---|---|---|
-| **Metrics** | Prometheus **pulls** each pod's `/metrics` (scrape annotations) | app **pushes** via SDK → Collector → Prometheus **remote-write** |
-| **Logs** | Promtail tails pod log files → Loki | app emits logs via SDK → Collector → Loki push |
-| **Traces** | app sends OTLP **straight** to Jaeger | app sends OTLP to the **Collector**, which forwards to Jaeger |
-| **Wiring** | three mechanisms, three configs | one SDK, one OTLP endpoint, one Collector config |
+| **Metrics** | Prometheus **pulls** `/metrics` | Collector **scrapes** `/metrics` → **remote-write** to Prometheus |
+| **Logs** | Promtail tails pod logs → Loki | Collector **filelog** tails pod logs → Loki |
+| **Traces** | app → Jaeger direct | app → **Collector** → Jaeger |
+| **Agents** | scraper + Promtail + app→Jaeger | **one** Collector |
 
-Full walk-through in [`docs/`](docs/00-overview.md) (00 overview → 01 collector → 02 app →
-03 metrics → 04 logs → 05 traces → 06 why-this-vs-by-hand).
+## Two things to know
 
-## ⚠ The metric-name gotcha (important)
+- **Metric names do NOT change.** The Collector scrapes the app's Prometheus-client `/metrics`, so
+  the names stay `http_requests_total` / `http_server_requests_total` (labels `app`/`status`) and
+  the **parent Golden Signals dashboards work unchanged**. (An OTel-SDK app would get semconv
+  names instead.)
+- **Trace→logs is by service, not trace id.** bankobs logs carry `correlation_id`, not an OTel
+  `trace_id`, so the Jaeger "Trace to logs" link opens the service's logs in the span's time
+  window. See [`docs/03`](docs/03-logs-with-otel.md).
 
-With the OTel SDK the metric **names follow OpenTelemetry semconv**, not the Python client's
-names. So the by-hand dashboards keyed to `http_request_duration_seconds_*` /
-`http_requests_total` **may not match** what lands in Prometheus here (expect
-`http_server_request_duration_seconds_*`-style names after the remote-write translation). Do
-not assume — run **`make verify-metric-names`** to list the exact `__name__`s Prometheus
-actually received, and point your queries/dashboards at those. This is called out in
-[`docs/03-metrics-with-otel.md`](docs/03-metrics-with-otel.md).
-
-## Needs box validation
-
-Built from the lab's known shape, but **not yet run on a cluster** (the fresh node was in use
-for the by-hand verification). Confirm on a box before relying on it:
-
-1. **The exporters resolve and flow.** `make verify-collector` should show non-zero
-   `otelcol_receiver_accepted_*` and `otelcol_exporter_sent_*`. If the `loki` or
-   `prometheusremotewrite` exporter errors, check the Collector logs
-   (`kubectl -n monitoring logs deploy/otel-collector`).
-2. **Collector image/exporter availability.** Pinned to `otel/opentelemetry-collector-contrib:0.102.1`
-   because the `loki` exporter (needed for Loki 2.9.8) was later removed from contrib. Verify
-   the tag pulls and still carries both the `loki` and `prometheusremotewrite` exporters.
-3. **Prometheus remote-write receiver.** `make enable-remote-write` adds
-   `--web.enable-remote-write-receiver`; confirm the flag took (Prometheus `/status/flags`) and
-   that pushed series appear.
-4. **The real metric names** (see the gotcha above) — capture them with `make verify-metric-names`
-   and update any dashboard/query you reuse from the parent lab.
-5. **App OTLP endpoint reachability** — `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc:4317`
-   from the `bankobs` namespace.
+Full walk-through in [`docs/`](docs/00-overview.md): 00 overview → 01 collector → 02 metrics →
+03 logs → 04 traces → 05 grafana → 06 incident-drills → 07 why-this-vs-by-hand.

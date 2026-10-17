@@ -192,10 +192,10 @@ verify-collector: ## Is the Collector accepting OTLP and exporting? (its self-te
 	   curl -s http://localhost:8888/metrics | grep -E 'otelcol_receiver_accepted|otelcol_exporter_sent' | grep -vE '^#' | sed 's/^/    /' | head -20; \
 	   kill $$PF 2>/dev/null || true"
 
-verify-metric-names: ## Which http.* metric NAMES actually landed in Prometheus (OTel semconv, not Python)
-	$(STEP) "List Prometheus metric names containing 'http' or 'request' (expect OTel semconv names)" \
+verify-metric-names: ## Which http.* metric NAMES landed in Prometheus (native Prometheus-client names — the Collector scrapes /metrics)
+	$(STEP) "List Prometheus metric names containing 'http' or 'request' (expect http_requests_total / http_server_requests_total — NOT semconv)" \
 	  "kubectl -n $(OBS_NS) port-forward svc/prometheus-server 9090:80 >/dev/null 2>&1 & PF=$$!; sleep 4; \
-	   echo '  metric names seen (the OTel names your queries/dashboards must use):'; \
+	   echo '  metric names seen (same Prometheus-client names as the by-hand lab, so the parent dashboards match):'; \
 	   curl -s 'http://localhost:9090/api/v1/label/__name__/values' | jq -r '.data[]? | select(test(\"http|request\"))' | sed 's/^/    /' | head -40; \
 	   echo '  (if empty: give it ~1 min after make traffic, and check make verify-collector)'; \
 	   kill $$PF 2>/dev/null || true"

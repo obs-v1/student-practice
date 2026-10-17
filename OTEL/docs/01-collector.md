@@ -1,95 +1,70 @@
-# 01 — The OpenTelemetry Collector
+# 01 — The OpenTelemetry Collector (the one new moving part)
 
-## The one idea
+The Collector is the whole difference between this module and the by-hand lab. It is **one
+component** that collects all three signals and forwards them to the backends you already know.
 
-The Collector is a small service that **receives** telemetry in one place and **exports** it to
-wherever it needs to go. It sits between your app and your backends so the app only ever needs
-to know **one** address.
+## Shape: a DaemonSet node-agent
+
+```yaml
+mode: daemonset          # one agent per node
+command: { name: otelcol-contrib }
+image: { repository: otel/opentelemetry-collector-contrib, tag: "0.102.1" }
+```
+
+Why a DaemonSet and not a single Deployment? The **`filelog`** receiver reads **node-local** pod
+log files (`/var/log/pods/...`), so the Collector has to run on every node. This kind cluster has
+one node, so that is one pod — but the shape is what matters. The app still reaches it through a
+normal Service (`otel-collector`, ports `:4317`/`:4318`) for OTLP traces.
+
+## Three receivers → three exporters
+
+See [`collector/values.yaml`](../collector/values.yaml). In one picture:
 
 ```mermaid
 flowchart LR
-  R["receivers\n(OTLP :4317/:4318)"] --> PR["processors\n(memory_limiter → resource → batch)"]
-  PR --> E1["exporter: otlp/jaeger"]
-  PR --> E2["exporter: prometheusremotewrite"]
-  PR --> E3["exporter: loki"]
-  E1 --> J["Jaeger"]
-  E2 --> P["Prometheus"]
-  E3 --> L["Loki"]
-  classDef x fill:#fef3e8,stroke:#d6914a,color:#14213d; class R,PR,E1,E2,E3 x;
+  R1["prometheus\n(scrape /metrics)"] --> PM["metrics pipeline"] --> E1["prometheusremotewrite"] --> P["Prometheus"]
+  R2["filelog\n(tail pod logs)"] --> PL["logs pipeline"] --> E2["loki"] --> L["Loki"]
+  R3["otlp\n(:4317 / :4318)"] --> PT["traces pipeline"] --> E3["otlp/jaeger"] --> J["Jaeger"]
 ```
 
-A Collector config is just three lists plus pipelines that connect them:
-**receivers → processors → exporters**.
+| Pillar | Receiver | How it collects | Exporter | Doc |
+|---|---|---|---|---|
+| Metrics | `prometheus` | scrapes each bankobs `/metrics` (annotation discovery) | `prometheusremotewrite` | [02](02-metrics-with-otel.md) |
+| Logs | `filelog` | tails `/var/log/pods` (the `logsCollection` preset) | `loki` | [03](03-logs-with-otel.md) |
+| Traces | `otlp` | receives spans the app's SDK pushes | `otlp/jaeger` | [04](04-traces-with-otel.md) |
 
-## The concrete values (this lab)
+The `kubernetesAttributes` + `logsCollection` presets add the `k8sattributes` processor, the
+`filelog` receiver, and the RBAC/host mounts they need; the rest of the pipeline is spelled out
+in the values file.
 
-Everything is in [`collector/values.yaml`](../collector/values.yaml). The important lines:
+## The one gotcha: pin the chart to the image
 
-- **Chart:** `open-telemetry/opentelemetry-collector`, `mode: deployment` (one pod; the app
-  pushes to it over the network, so it needn't run on every node).
-- **Image:** `otel/opentelemetry-collector-contrib` (the **contrib** build — the
-  `prometheusremotewrite` and `loki` exporters are not in the core image), with
-  `command.name: otelcol-contrib`.
-- **Service name:** `fullnameOverride: otel-collector` → the app reaches it at
-  `otel-collector.monitoring.svc:4317`.
+The chart is pinned in the Makefile:
 
-Receivers / processors / exporters:
+```make
+OTEL_CHART_VER ?= 0.93.3     # appVersion 0.102.1, matches the pinned image
+```
 
-| Part | Value | Why |
-|---|---|---|
-| receiver | `otlp` grpc `:4317`, http `:4318` | one door for traces + metrics + logs |
-| processor | `memory_limiter` | sheds load before OOM — **must be first** |
-| processor | `resource` → `deployment.environment=training` | stamps an attribute on every signal |
-| processor | `batch` | groups exports for efficiency |
-| exporter | `otlp/jaeger` → `jaeger-collector.monitoring:4317` | traces |
-| exporter | `prometheusremotewrite` → `http://prometheus-server.monitoring/api/v1/write` | metrics (push) |
-| exporter | `loki` → `http://loki.monitoring:3100/loki/api/v1/push` | logs |
-| exporter | `debug` | one-line batch summaries in the Collector's own log |
+If you let the chart float, a newer chart **auto-renames** the `otlp` exporter to `otlp_grpc`,
+which the pinned `0.102.1` binary does not recognise — the Collector then crashloops with
+`unknown type: "otlp_grpc"`. Chart `0.93.3` ships appVersion `0.102.1` and predates that rename.
+(The image is pinned because the `loki` exporter we need for Loki 2.9.8 was later removed from
+contrib — see [03](03-logs-with-otel.md).)
 
-Three pipelines wire them up — one per signal — all sharing the single OTLP receiver.
-
-## The steps
+## Install it
 
 ```bash
-# install the Collector (Helm)
-make collector
+make -C OTEL collector      # helm upgrade --install, pinned chart, then rollout status
 ```
 
-What the target runs:
+## Watch what it is doing
 
 ```bash
-helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
-  -n monitoring --create-namespace -f collector/values.yaml
-kubectl -n monitoring rollout status deploy/otel-collector --timeout=180s
+kubectl -n monitoring logs -f daemonset/otel-collector-agent   # the DaemonSet is "-agent"
+make -C OTEL verify-collector                                  # accepted/exported counters
 ```
 
-## See it work
+`verify-collector` prints the Collector's own telemetry — non-zero `otelcol_receiver_accepted_*`
+and `otelcol_exporter_sent_*` mean signals are flowing in and out.
 
-Nothing flows yet — the app isn't pointed at it (that's [docs/02](02-app-otel.md)). But you can
-confirm it's healthy and watch it live:
-
-```bash
-kubectl -n monitoring get deploy otel-collector          # 1/1 ready
-kubectl -n monitoring logs -f deploy/otel-collector       # the debug exporter prints here
-make verify-collector                                     # accepted/exported counters (0 until app-otel)
-```
-
-Once traffic flows, `make verify-collector` shows non-zero
-`otelcol_receiver_accepted_*` (coming in) and `otelcol_exporter_sent_*` (going out) — your proof
-the pipeline is moving data.
-
-## Why a Collector at all? (the contrast)
-
-In the by-hand lab the app talked to Jaeger directly and Prometheus/Promtail reached in from
-outside. That works, but every backend is wired separately and the app is coupled to each one.
-With the Collector:
-
-- the **app** has one config line (`OTEL_EXPORTER_OTLP_ENDPOINT`) regardless of how many
-  backends you run;
-- you **swap, add or remove a backend** by editing the Collector, never the app (change
-  `prometheusremotewrite` to an OTLP vendor endpoint and you've switched metrics vendors with
-  zero app redeploys);
-- you can **process** signals in flight (filter, redact, batch, add attributes) in one place.
-
-➡ Next: [02-app-otel.md](02-app-otel.md)
+➡ Next: [02-metrics-with-otel.md](02-metrics-with-otel.md)
