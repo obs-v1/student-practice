@@ -133,10 +133,12 @@ metrics: ## 2. Prometheus (Helm) scrapes /metrics directly (no OTel)
 	@echo "    prometheus.io/scrape annotation. Opt one in (docs/02), or 'make enable-annotations-to-deploy'."
 	@$(MAKE) -s _url HP=9090 NAME=Prometheus
 
-enable-annotations-to-deploy: ## Opt EVERY service into scraping (uncomment the annotation in all charts)
-	$(STEP) "Uncomment the prometheus.io/scrape annotation in every service's deployment.yaml" \
+enable-annotations-to-deploy: ## Turn the app's observability on before deploy: scrape annotations + Go-tier tracing
+	$(STEP) "Uncomment prometheus.io/scrape on every service + set the Go tier's OBSERVABILITY_MODE=full" \
 	        "bash scripts/scrape-annotations.sh on"
-	@echo "  ✓ now apply it:  make app   (helm upgrade rolls the services with the annotation)"
+	@echo "  ✓ metrics opt-in + Go-tier tracing enabled. Now apply it:  make app"
+	@echo "    (the Go payment tier is OTel-instrumented in code; OBSERVABILITY_MODE=full lets it export"
+	@echo "     spans whose trace id matches its logs, so trace->logs works for it too — no eBPF needed.)"
 
 disable-annotations-to-deploy: ## Reverse of enable-annotations-to-deploy: re-comment the annotation in all service charts
 	$(STEP) "Re-comment the prometheus.io/scrape annotation in every service's deployment.yaml" \
@@ -167,14 +169,13 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	        "helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=420s"
 	$(STEP) "Expose the Jaeger UI on a NodePort (the chart's UI service is headless)" \
 	        "kubectl apply -f traces/jaeger-ui.yaml"
-	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
+	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP; the Go tier is enabled via OBSERVABILITY_MODE=full at deploy)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP) MANAGEMENT_OTLP_TRACING_ENDPOINT=http://jaeger-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
-	$(STEP) "eBPF-instrument the Go payment tier (gateway/payment-gateway/upi) — they have NO in-code OTel (Beyla, traces/beyla.yaml)" \
-	        "kubectl apply -f traces/beyla.yaml && kubectl -n $(OBS_NS) rollout status daemonset/beyla --timeout=240s"
 	@echo ""
-	@echo "  ✓ Traces flowing three ways into Jaeger: Python (in-code SDK), Java (Spring OTLP), Go (eBPF/Beyla)."
-	@echo "    Beyla is a privileged DaemonSet scoped by port (8000/8010/8011) so it won't double-trace the OTel tiers."
-	@echo "    Generate traffic, then: make verify-traces   (docs/04 explains the three tiers)"
+	@echo "  ✓ Traces flowing into Jaeger from all three tiers, each via in-app OTel: Python (SDK),"
+	@echo "    Java (Spring OTLP), Go (the shared Go OTel SDK — on once OBSERVABILITY_MODE=full, set by"
+	@echo "    'make enable-annotations-to-deploy'). The Go span's trace id is the one in its logs, so"
+	@echo "    trace->logs correlates for the payment tier too. Generate traffic, then: make verify-traces"
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
 all: enable-annotations-to-deploy app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
@@ -201,7 +202,7 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 datasources: ## Register Prometheus + Loki + Jaeger datasources in one shot (instead of the UI)
 	$(STEP) "Register all three datasources via the Grafana API (prometheus=default, loki, jaeger)" \
 	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
-	@echo "  ✓ datasources added + trace↔logs wired by trace id (span 'Related logs' → Loki |= traceId; log trace_id → Jaeger). Exact-match for the journey tier; empty for Beyla/Go + Python/Java — narrow with {app=\"<svc>\"}."
+	@echo "  ✓ datasources added + trace↔logs wired by trace id (span 'Related logs' → Loki |= traceId; log trace_id → Jaeger). Works where a service logs a trace id (journey tier + the self-tracing Go payment tier); empty for services that don't — narrow with {app=\"<svc>\"}."
 	@echo "    Try them in Explore, or run 'make golden-dashboard'."
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)
@@ -316,8 +317,6 @@ clean: ## Remove the backends (leaves the app running)
 	        "helm -n $(OBS_NS) uninstall prometheus loki jaeger grafana 2>/dev/null || true"
 	$(STEP) "Delete the monitoring namespace (Loki, Promtail, Jaeger, + anything left)" \
 	        "kubectl delete namespace $(OBS_NS) --ignore-not-found"
-	$(STEP) "Turn the app's telemetry back off (undo the trace wiring)" \
-	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- MANAGEMENT_OTLP_TRACING_ENDPOINT- MANAGEMENT_TRACING_SAMPLING_PROBABILITY- || true"
-	$(STEP) "Remove the Beyla eBPF cluster RBAC (its DaemonSet went with the monitoring namespace)" \
-	        "kubectl delete clusterrole beyla clusterrolebinding beyla --ignore-not-found 2>/dev/null || true"
+	$(STEP) "Turn the app's telemetry back off (undo the trace wiring, incl. the Go tier's OBSERVABILITY_MODE)" \
+	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OBSERVABILITY_MODE=dark OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_ENDPOINT- MANAGEMENT_OTLP_TRACING_ENDPOINT- MANAGEMENT_TRACING_SAMPLING_PROBABILITY- || true"
 	@echo "  ✓ backends gone, app back to blank slate. (To delete the app: make -C bankobs down)"

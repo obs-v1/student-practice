@@ -71,15 +71,19 @@ and Loki — so only traces go to Jaeger.
 > (you'd get ~23 of 60 services, all the Python tier). Both lines together give the Python **and**
 > Java tiers (~43 services).
 >
-> **There's a third tier: the Go services** (`gateway-service`, `payment-gateway`, `upi-service`).
-> They have **no OpenTelemetry compiled in**, and Go has no runtime agent — so *no* env var makes
-> them emit spans. A payment trace is left with holes exactly at those hops. The only way to trace
-> them without changing the images is **eBPF auto-instrumentation**, so `make traces` also deploys
-> **Grafana Beyla** (a privileged DaemonSet, [`traces/beyla.yaml`](../traces/beyla.yaml)) that
-> attaches to the Go binaries in the kernel and emits OTLP traces to the same Jaeger — scoped by
-> port so it doesn't double-trace the OTel tiers. That fills the Go hops (→ ~46 services) and is a
-> nice lesson in itself: **three ways to get a trace** — in-code SDK (Python), framework exporter
-> (Java/Spring), and zero-code eBPF (Go) — all now wired by the one `make traces` step.
+> **The third tier: the Go services** (`gateway-service`, `payment-gateway`, `upi-service`, and the
+> NEFT/RTGS/IMPS/NACH rails). These are **also** OpenTelemetry-instrumented — a shared Go OTel SDK
+> (`services/shared/go/service`) creates spans, propagates W3C trace context downstream, and stamps
+> the span's `trace_id` into **every log line**. But they gate the exporter behind their own flag,
+> **`OBSERVABILITY_MODE`** (not `OTEL_SDK_DISABLED`), and bankobs ships them `dark`, so the spans are
+> created but never exported. Set **`OBSERVABILITY_MODE=full`** — which `make enable-annotations-to-deploy`
+> now does — and they export OTLP/gRPC to Jaeger over the same `OTEL_EXPORTER_OTLP_ENDPOINT` (`:4317`)
+> as the Python tier. The Go hops fill in (→ ~46 services), and because the exported span's `trace_id`
+> is the one already in the Go logs, **trace→logs correlates for the payment tier too** (docs/05).
+>
+> So all three tiers reach Jaeger through **in-app OpenTelemetry** — Python (SDK), Java (Spring OTLP),
+> Go (the shared Go SDK). No eBPF, no agent: a span exists only if code inside the service makes it —
+> which is exactly the lesson.
 
 That's a real simplification over the course's setup — one fewer moving part, the app talks to
 Jaeger directly.

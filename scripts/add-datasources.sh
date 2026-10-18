@@ -11,15 +11,13 @@
 #   - Jaeger "Trace to logs" (tracesToLogsV2) -> Loki: a span's "Related logs" button queries Loki for
 #     that span's trace id ({namespace="bankobs"} |= "<traceId>").
 #   - Loki "Derived fields" -> Jaeger: each JSON log line's "trace_id" becomes a link to its Jaeger trace.
-# COVERAGE — be honest with students: the trace-id jump lands on the EXACT request's logs only for
-# services that stamp the same trace id into BOTH their logs and Jaeger — the journey tier
-# (loan-origination, notification-orchestrator, remittance-service, ...). It comes back EMPTY for:
-#   - the Go payment tier (gateway-service, payment-gateway) — traced by Beyla (eBPF), which mints its
-#     OWN trace ids, so the app's logged trace_id never matches the Jaeger one;
-#   - the Python/Java tiers (fraud, kyc, account, ...) — they don't log a trace id at all.
-# When it's empty, drop the `|= "<id>"` filter to get {namespace="bankobs"} for the window and narrow
-# by {app="<service>"}. That partial coverage IS the by-hand lesson: without one consistently-propagated
-# id (what a unified OTel stack gives you), trace<->log correlation only works where you got lucky.
+# COVERAGE: the trace-id jump lands on the EXACT request's logs for any service that stamps the span's
+# trace id into its logs — which every tier does, through in-app OpenTelemetry: the journey tier
+# (loan-origination, ...) and the Go payment tier (gateway-service/payment-gateway/upi-service via the
+# shared Go SDK, once OBSERVABILITY_MODE=full — set by `make enable-annotations-to-deploy`) both export
+# spans whose trace_id IS the one in their logs; Java/Spring + Python likewise. The only EMPTY case is
+# per-request — a trace whose service didn't write a log line for it — where you drop the `|= "<id>"`
+# filter and narrow by {app="<service>"}.
 #
 # Idempotent AND uid-stable: an existing datasource is UPDATED in place (uid preserved), so a
 # re-run never breaks a dashboard already bound to it. Only a missing datasource is created.

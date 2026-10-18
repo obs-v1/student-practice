@@ -30,20 +30,18 @@ Open Grafana (`make urls` → Grafana, `http://<box>:3000`, log in **admin / adm
 | Loki | `derivedFields`: each line's `trace_id` → a link to its Jaeger trace (**logs → trace**) |
 | Jaeger | `tracesToLogsV2` (custom query `{namespace="bankobs"} |= "$${__trace.traceId}"`): a span → Loki filtered to that trace id (**trace → logs**) |
 
-> **Why the trace-id jump works for some services and is empty for others — that split IS the lesson.**
-> Correlating a span to its *exact* log lines needs the **same trace id** stamped into both. bankobs
-> only does that in part:
-> - ✅ **Journey tier** (`loan-origination`, `notification-orchestrator`, `remittance-service`, …) logs
->   the OTel trace id that Jaeger also has → the button lands on that request's lines.
-> - ❌ **Go payment tier** (`gateway-service`, `payment-gateway`) is traced by **Beyla** (eBPF), which
->   mints its *own* trace ids — so the app's logged `trace_id` never matches the Jaeger one.
-> - ❌ **Python/Java tiers** (`fraud-detection`, `account-service`, …) don't log a trace id at all.
+> **The trace-id jump correlates a span to its *exact* log lines** — it needs the **same trace id**
+> stamped into both, and every bankobs tier does that, through in-app OpenTelemetry:
+> - ✅ **Journey tier** (`loan-origination`, `notification-orchestrator`, `remittance-service`, …) —
+>   OTel SDK; the span's trace id is the one in its logs.
+> - ✅ **Go payment tier** (`gateway-service`, `payment-gateway`, `upi-service`) — the shared Go OTel
+>   SDK; it exports real spans and stamps the same `trace_id` into its logs (once `OBSERVABILITY_MODE=full`,
+>   set by `make enable-annotations-to-deploy`).
+> - ✅ **Java/Spring + Python tiers** — Spring OTLP / OTel SDK, same deal.
 >
-> So the result is precise where the id propagates and empty where it doesn't. There's no single id
-> crossing every hop — which is exactly *why* you reach for a unified, OTel-based stack (collector +
-> SDK log-correlation) that stamps one trace id into every span **and** every log line. Feeling that
-> gap by hand is the whole point. (`$${...}` in the YAML is Grafana's provisioning env-escape — see the
-> file header.)
+> The one thing that can still come up empty is per-request: a trace whose service didn't write a log
+> line for it has nothing to match, so you drop the `|= "<id>"` and scope by service. (`$${...}` in the
+> YAML is Grafana's provisioning env-escape — see the file header.)
 
 > This is the *payoff* module — it deliberately contrasts with the by-hand lab, where the three
 > tools stand alone. Seeing them correlate is the lead-in to "why you reach for a unified stack."

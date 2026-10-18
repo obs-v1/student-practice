@@ -32,9 +32,9 @@ and the per-service chart show **`payment-gateway`** and **`gateway-service`** s
 
 **2. Traces — where in the chain.** Explore → **jaeger** → Service **`payment-gateway`** (or
 `gateway-service`) → open a recent trace. The span that calls `upi-service` **fails** — you'll see
-the error on that hop. (These Go services only appear because **Beyla** eBPF-instruments them;
-without it the trace would have a hole here.) Note the **service** on the failing span — that's
-your pivot into the logs.
+the error on that hop. (These Go services report spans via their own in-code OTel SDK, once
+`OBSERVABILITY_MODE=full` — see docs/04.) Note the **service** on the failing span — that's your
+pivot into the logs.
 
 **3. Logs — the actual cause.** Explore → **loki**, scope to that service:
 ```
@@ -43,12 +43,11 @@ your pivot into the logs.
 (or `{app="payment-gateway"}`). You'll find the real message — **`ERR_UPSTREAM` /
 `dial tcp …:8011: connect: connection refused`**. That's upi-service being unreachable.
 
-> **Here we pivot by service, not by trace id.** If you've run `make datasources`, a span's
-> **"Related logs"** button queries Loki for the span's trace id — but this Go payment tier
-> (`gateway-service`/`payment-gateway`) is traced by **Beyla**, which mints its own trace ids, so the
-> button comes back **empty** (their logged `trace_id` doesn't match Jaeger's). Drop the `|= "<id>"`
-> and scope by `{app="<service>"}` instead. The trace-id button *does* land on the exact request for
-> journey-tier services like `loan-origination` that log a matching id — see docs/05 for the split.
+> **Pivoting by service vs by trace id.** If you've run `make datasources`, a span's **"Related
+> logs"** button queries Loki for the span's trace id — and for this Go payment tier
+> (`gateway-service`/`payment-gateway`) that **works**: they're OTel-instrumented in code, so the
+> span's `trace_id` is the one in their logs. Scoping by `{app="<service>"}` (above) is the simple
+> fallback — handy when a given trace happens to have no log line of its own. See docs/05.
 
 **Root cause:** `upi-service` is down; `payment-gateway`/`gateway-service` can't reach it, so they
 return **502 `ERR_UPSTREAM`**.

@@ -9,13 +9,12 @@
 #
 # NOTE on the `$${...}` escaping below: in a provisioning file Grafana expands `${VAR}` as an ENV var
 # (-> empty), so the trace-to-logs variables MUST be written `$$` (the API path in add-datasources.sh
-# does NOT need this). COVERAGE — tell students honestly: the trace-id jump lands on the EXACT
-# request's logs only where the SAME id is in both the logs and Jaeger: the journey tier
-# (loan-origination, notification-orchestrator, remittance-service, ...). It's EMPTY for the Go payment
-# tier (gateway-service/payment-gateway — Beyla mints its own trace ids) and the Python/Java tiers
-# (they log no trace id). When empty, drop the `|= "<id>"` to get the window and narrow by {app="<svc>"}.
-# That partial coverage IS the lesson: without one consistently-propagated id (what a unified OTel
-# stack gives you) trace<->log correlation only works where you got lucky.
+# does NOT need this). COVERAGE: the trace-id jump lands on the EXACT request's logs wherever a service
+# stamps the span's id into its logs -- which every bankobs tier does via in-app OpenTelemetry: the
+# journey tier (loan-origination, ...), the Java/Python tiers, and the Go payment tier
+# (gateway-service/payment-gateway/upi-service -- the shared Go SDK, once OBSERVABILITY_MODE=full). The
+# only empty case is per-request: a trace whose service didn't log a line for it -- drop the `|= "<id>"`
+# and narrow by {app="<svc>"}.
 
 # Pin Grafana to the latest 13.x (chart appVersion still tracks 12.x, so override the image tag).
 image:

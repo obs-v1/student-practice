@@ -69,11 +69,12 @@ make -C OTEL fault NAME=latency TARGET=eligibility-engine # Drill 2 — slow DOW
   the names stay `http_requests_total` / `http_server_requests_total` (labels `app`/`status`) and
   the **parent Golden Signals dashboards work unchanged**. (An OTel-SDK app would get semconv
   names instead.)
-- **Trace↔logs is by trace id, with partial coverage.** The Jaeger "Related logs" button queries
-  Loki for the span's trace id — exact-match for the Spring journey tier (`loan-origination`, …) that
-  logs a matching `trace_id`, empty for the Go tier (no spans here) and non-logging services (narrow
-  by `{k8s_container_name="<svc>"}`). The Collector forwards logs; it doesn't inject trace ids — the
-  gap is the lesson. See [`docs/03`](docs/03-logs-with-otel.md) / [`docs/05`](docs/05-grafana.md).
+- **Trace↔logs is by trace id, across every tier.** The Jaeger "Related logs" button queries Loki for
+  the span's trace id and lands on that request's exact lines — for Python (SDK), Java/Spring, and the
+  Go payment tier (its shared Go SDK, once `OBSERVABILITY_MODE=full`), all of which stamp the span's
+  `trace_id` into their logs. The only empty case is per-request (a trace with no log line of its own;
+  narrow by `{k8s_container_name="<svc>"}`). The app's instrumentation stamps the id, not the Collector
+  — that's the lesson. See [`docs/03`](docs/03-logs-with-otel.md) / [`docs/05`](docs/05-grafana.md).
 
 Full walk-through in [`docs/`](docs/00-overview.md): 00 overview → 01 collector → 02 metrics →
 03 logs → 04 traces → 05 grafana → 06 incident-drills → 07 why-this-vs-by-hand.

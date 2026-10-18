@@ -10,16 +10,16 @@
 #       k8s_namespace_name and the service label is k8s_container_name (not `namespace`/`app`).
 #   (2) The Collector wraps each log line as {"body":"<escaped JSON>"}, so a trace id appears as
 #       \"trace_id\":\"<hex>\" — the derived-field regex must match THROUGH the escaping.
-# Correlation is still BY TRACE ID, both directions (same as the by-hand lab): a span's "Related logs"
+# Correlation is BY TRACE ID, both directions (same as the by-hand lab): a span's "Related logs"
 # button queries Loki for the span's trace id, and a log line's trace_id links back to its Jaeger
-# trace. COVERAGE is partial and that IS a lesson: the Collector FORWARDS the app's existing logs, it
-# does NOT inject trace ids. So the exact-request jump resolves only where the app itself logs a trace
-# id that Jaeger also has — the journey tier (loan-origination, notification-orchestrator,
-# remittance-service; verified their logged trace_id is in Jaeger). It's empty for the Go tier
-# (no in-code OTel and NO Beyla in this module, so gateway-service/payment-gateway emit no spans at
-# all) and for services that don't log a trace id. When empty, drop the `|= "<id>"` and narrow by
-# {k8s_container_name="<service>"}. (Real full correlation needs the app to use an OTel log appender
-# that stamps the trace id into every line — bankobs doesn't; that gap is the point.)
+# trace. COVERAGE: every bankobs tier is OTel-instrumented in code and stamps the span's trace id into
+# its own logs, so the exact-request jump resolves across the board — the journey tier (loan-origination,
+# ...), the Java/Python tiers, AND the Go payment tier (gateway-service/payment-gateway/upi-service via
+# the shared Go SDK, once OBSERVABILITY_MODE=full — set by `make enable-annotations-to-deploy`; verified
+# a gateway-service trace id -> its Loki logs). The only EMPTY case is per-request — a trace whose
+# service didn't write a log line for it — where you drop the `|= "<id>"` and narrow by
+# {k8s_container_name="<service>"}. KEY lesson: the Collector FORWARDS the app's logs — the trace id in
+# them comes from the app's own instrumentation, not the Collector.
 #
 # In-cluster URLs (monitoring namespace): prometheus -> http://prometheus-server (default),
 # loki -> http://loki:3100, jaeger -> http://jaeger:16686.

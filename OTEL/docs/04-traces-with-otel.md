@@ -1,9 +1,9 @@
 # 04 — Traces: the app emits, the Collector forwards
 
-Traces are the pillar the app emits itself — the Python and Java tiers are already
-OpenTelemetry-instrumented. The main change from the by-hand lab is **one hop**: the app sends OTLP
-to the **Collector** instead of straight to Jaeger, and the Collector forwards to Jaeger. (The one
-tier the app *can't* trace on its own — the Go payment services — is covered by Beyla eBPF, below.)
+Traces are the pillar the app emits itself — **every tier** is OpenTelemetry-instrumented in code
+(Python SDK, Java/Spring, and the Go payment services via a shared Go SDK). The main change from the
+by-hand lab is **one hop**: the app sends OTLP to the **Collector** instead of straight to Jaeger, and
+the Collector forwards to Jaeger.
 
 ```mermaid
 flowchart LR
@@ -22,11 +22,8 @@ point of control the metrics and logs pillars now get.
 
 ## What `make traces` sets
 
-`make -C OTEL traces` does two things — turn on the app's own SDK traces, and deploy **Beyla** for
-the Go tier that has no SDK. **Three ways to a span, all landing on the Collector.**
-
-**1) The app's SDK** (Python + Java). Point it at the Collector (this does **not** touch metrics or
-logs — the Collector collects those):
+`make -C OTEL traces` turns on every tier's in-app tracing and points it at the Collector (this does
+**not** touch metrics or logs — the Collector collects those):
 
 ```bash
 kubectl -n bankobs set env deployment -l domain \
@@ -42,25 +39,14 @@ kubectl -n bankobs set env deployment -l domain \
 - **Python** services export OTLP/gRPC to the Collector on **:4317**.
 - **Java/Spring** services export OTLP/HTTP to the Collector on **:4318**
   (`MANAGEMENT_OTLP_TRACING_ENDPOINT`), at 100% sampling.
+- **The Go payment tier** (`gateway-service`, `payment-gateway`, `upi-service`) uses a **shared Go
+  OTel SDK** and exports OTLP/gRPC to the Collector on **:4317** too — but it gates the exporter behind
+  its own flag, `OBSERVABILITY_MODE`, which `make enable-annotations-to-deploy` sets to `full`. (Until
+  then it creates spans but doesn't export them.) It's a real OpenTelemetry SDK compiled into the
+  service — which is why its spans carry the same `trace_id` it writes into its logs.
 
 `OTEL_METRICS_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none` are deliberate: the app has no useful
 OTel metrics or logs to push, so we leave those off and let the Collector scrape/tail instead.
-
-**2) Beyla (eBPF) for the Go payment tier.** `gateway-service`, `payment-gateway` and `upi-service`
-are Go binaries with **no OpenTelemetry compiled in** — the `OTEL_*` env above is set on them but
-does nothing, so they emit **no spans**, and a payment trace would have holes exactly at those hops.
-Beyla attaches to the Go binaries in the kernel via eBPF and produces OTLP traces with no code
-change, exporting to the **Collector** (not straight to Jaeger — same one-hop-through-the-Collector
-shape as the SDK):
-
-```bash
-kubectl apply -f traces/beyla.yaml      # DaemonSet, scoped to ports 8000/8010/8011
-```
-
-`traces/beyla.yaml` is a privileged, `hostPID` DaemonSet scoped by listening port so it instruments
-**only** the three Go services (it won't double-trace the Python/Java tiers). It needs a kernel
-≥ 5.8 with BTF — the kind node (RHEL 9) has it. Without this step, `verify-traces` is missing the Go
-tier; with it, the Go hops appear and payment traces are complete.
 
 ## Verify
 
@@ -69,8 +55,8 @@ make -C OTEL verify-traces       # the services Jaeger has seen
 ```
 
 Expect ~46 services — including `gateway-service`, `payment-gateway` and `upi-service` (the Go tier,
-via Beyla). Open Jaeger (`make -C OTEL urls`), search `payment-gateway`, and the payment waterfall now
-spans the Go hops too — all arriving via the Collector.
+as real SDK spans). Open Jaeger (`make -C OTEL urls`), search `payment-gateway`, and the payment
+waterfall spans the Go hops too — all arriving via the Collector.
 
 > **Heads-up for the drills:** traces here are HTTP server + client spans across services (e.g.
 > `loan-origination` → `eligibility-engine`). That cross-service linking is exactly what Drill 2

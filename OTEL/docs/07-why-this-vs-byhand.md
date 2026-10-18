@@ -36,13 +36,13 @@ flowchart LR
   Prometheus-client metrics. An app that emitted OTel-SDK metrics would get standardised
   **semconv** names instead — vendor-neutral, but different from your old dashboards. Here you
   get the Collector's single-point-of-collection benefit *without* the rename cost.
-- **Correlation is only as good as the app's logs.** Trace↔logs is wired **by trace id**, but it
-  resolves only where the app logs a trace id Jaeger also has — the Spring journey tier
-  (`loan-origination`, …); it's empty for the Go tier (no spans here) and the services that log no
-  trace id, where you narrow by `{k8s_container_name="<service>"}` ([03](03-logs-with-otel.md)). The
-  **Collector forwards logs, it doesn't stamp the trace id into them** — a fully OTel-instrumented app
-  with an OTel log appender would get the one-click join everywhere; the app's logging decides, not
-  the Collector.
+- **Correlation is only as good as the app's logs.** Trace↔logs is wired **by trace id** and resolves
+  across every tier — Python (SDK), Java/Spring, and the Go payment tier (its shared Go SDK, once
+  `OBSERVABILITY_MODE=full`) all stamp the span's trace id into their own logs
+  ([03](03-logs-with-otel.md)). The only empty case is per-request — a trace whose service didn't log a
+  line for it — where you narrow by `{k8s_container_name="<service>"}`. The point stands: the
+  **Collector forwards logs, it doesn't stamp the trace id into them** — the app's own instrumentation
+  does, which is why every tier here runs in-app OTel.
 - **Graceful apps hide failures.** bankobs absorbs DB outages (and even connection pressure)
   into its cache and handled-4xx, so a database fault does **not** reliably spike the Errors — or
   even the Latency — panel. That's why both drills are **latency** incidents read from the

@@ -149,14 +149,14 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
    (e.g. `ERR_UPSTREAM`, `connection refused`, `relation ... does not exist`). That is your
    **why**.
 
-> **Could you use the trace id here instead of the service?** Not for *this* incident. The
-> `make datasources`/`make correlation` wiring does give a span a **"Related logs"** button that
-> queries Loki for the span's trace id (`{namespace="bankobs"} |= "<traceId>"`), and it lands on the
-> exact request's lines for **journey-tier** services that log a matching id (`loan-origination`,
-> `remittance-service`, …). But the Go payment tier you're chasing here (`upi-service`,
-> `payment-gateway`, `gateway-service`) is traced by **Beyla**, which mints its *own* trace ids — so
-> their logged `trace_id` never matches Jaeger's and the button comes back empty. That's why, for this
-> drill, you pivot by **service**. (More on the coverage split just below.)
+> **Could you use the trace id here instead of the service?** Often, yes. The
+> `make datasources`/`make correlation` wiring gives a span a **"Related logs"** button that queries
+> Loki for the span's trace id (`{namespace="bankobs"} |= "<traceId>"`), and it lands on the exact
+> request's lines for any service that logs a matching id — including the Go payment tier you're
+> chasing here (`upi-service`, `payment-gateway`, `gateway-service`): those are OTel-instrumented in
+> code (the shared Go SDK), so the exported span's `trace_id` **is** the one in their logs. The pivot
+> by **service** below always works too, and is the fallback whenever a trace happens to have no log
+> line of its own. (More on when the trace-id jump is empty just below.)
 
 > **The Loki stream label is `app`, not `service`.** Use `{app="upi-service"}` (the `service`
 > value also lives *inside* the JSON line, reachable with `| json | service="upi-service"`, but it
@@ -168,17 +168,16 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
   `{app="<service>"}` in Loki for the span's window. Always works; two steps.
 - **Trace-id button (`make datasources` / `make correlation`):** provisions the Jaeger datasource with
   `tracesToLogsV2`, so an expanded span grows a **"Related logs"** button that queries Loki for the
-  span's trace id (`{namespace="bankobs"} |= "<traceId>"`). For a **journey-tier** service it lands on
-  that exact request's lines; for the Go payment tier (Beyla) and the Python/Java tiers (no logged
-  trace id) it's **empty** — drop the `|= "<id>"` and narrow by `{app="<service>"}`. The reverse is
-  wired too: a log line's `trace_id` is a link back to its Jaeger trace.
+  span's trace id (`{namespace="bankobs"} |= "<traceId>"`). When the service logged a line for that
+  request it lands on those exact lines; when a given trace has no log line of its own it's **empty** —
+  drop the `|= "<id>"` and narrow by `{app="<service>"}`. The reverse is wired too: a log line's
+  `trace_id` is a link back to its Jaeger trace.
 
-> **Why the trace-id jump is only partial — the lesson.** Landing on the *exact* lines needs the
-> **same trace id** in the span and the log. bankobs manages that only where a service runs the OTel
-> SDK in-code and stamps its trace id into its own logs (the journey tier). Beyla-traced Go services
-> get a *different* id in Jaeger than they log; the Python/Java tiers log no id at all. There is no one
-> id crossing every hop — which is exactly what a unified OTel stack (collector + SDK log-correlation)
-> provides, turning this into a reliable one-click jump everywhere. Feeling that gap by hand is the point.
+> **Why the trace-id jump can still come up empty.** Landing on the *exact* lines needs the **same
+> trace id** in the span and the log. Every bankobs tier now manages that — Python (SDK), Java (Spring
+> OTLP), and the Go payment tier (the shared Go SDK, once `OBSERVABILITY_MODE=full`) all stamp the
+> span's `trace_id` into their logs. The only gap left is per-request: a trace whose service didn't
+> write a business log line for it has nothing to match, so you fall back to `{app="<service>"}`.
 
 ### No traces? Metrics → logs still gets you most of the way
 
