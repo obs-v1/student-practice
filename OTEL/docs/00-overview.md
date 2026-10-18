@@ -78,7 +78,7 @@ make -C OTEL verify                 # sanity: Collector flowing? metric names? l
 
 | Step | What happens | Doc |
 |---|---|---|
-| `make -C OTEL all` | `backends` → `enable-remote-write` → `collector` → `app-otel` | [01](01-collector.md) |
+| `make -C OTEL all` | `backends` → `enable-remote-write` → `collector` → `traces` (app SDK + Beyla eBPF for the Go tier) | [01](01-collector.md) |
 | `make -C OTEL observe` | Grafana + datasources + dashboards | [05](05-grafana.md) |
 | the two drills | a slow service, and a slow downstream dependency | [06](06-incident-drills.md) |
 

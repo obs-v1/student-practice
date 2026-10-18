@@ -11,7 +11,7 @@
 #      make backends            # Prometheus + Loki + Jaeger (reuses ../metrics ../logs ../traces)
 #      make enable-remote-write # flip ONE flag so Prometheus accepts pushed metrics
 #      make collector           # the OpenTelemetry Collector (collector/values.yaml)
-#      make app-otel            # point the app's OTLP (all 3 signals) at the Collector
+#      make traces              # app SDK traces → Collector + Beyla eBPF for the Go tier
 #      make all                 # the four above, in order
 #
 #  Prefer to type commands yourself?  add DRY=1 to PRINT each step without running it.
@@ -48,7 +48,7 @@ PARENT_SCRIPTS ?= $(PARENT)/scripts
 FAULTCTL       ?= $(PARENT)/faults/faultctl.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help backends enable-remote-write collector app-otel all \
+.PHONY: help backends enable-remote-write collector traces all \
         grafana datasources golden-dashboard observe \
         fault fault-stop fault-status fault-list \
         traffic traffic-bg traffic-stop verify verify-collector verify-metric-names \
@@ -58,7 +58,7 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 	 | sed -E 's/:.*## /\t/' | awk -F '\t' '{printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "  Order:  make backends → enable-remote-write → collector → app-otel   (or: make all)"
+	@echo "  Order:  make backends → enable-remote-write → collector → traces   (or: make all)"
 	@echo "  Assumes the parent lab's cluster + bankobs app are already up (see ../README.md)."
 	@echo "  Tip: DRY=1 prints steps without running them (do-it-by-hand mode)."
 
@@ -101,18 +101,21 @@ collector: ## 3. Deploy the OpenTelemetry Collector (scrape + tail + OTLP in →
 	@echo "    Watch what it does:  kubectl -n $(OBS_NS) logs -f daemonset/otel-collector-agent"
 
 # ───────────────────────────────────────────────────────────────────────────────
-#  SECTION 4 — point the APP at the Collector (all three signals over OTLP)
+#  SECTION 4 — traces: point the APP at the Collector + Beyla (eBPF) for the Go tier
 # ───────────────────────────────────────────────────────────────────────────────
-app-otel: ## 4. Point the app's TRACES at the Collector (metrics+logs are collected FOR the app)
-	$(SECTION) "4" "The app's traces, via the Collector" "Only traces need the app's help — the SDK emits spans. Metrics and logs the Collector collects on its own (scrape + tail), no app change."
+traces: ## 4. Turn on traces → the Collector: the app's SDK (Python/Java) + Beyla eBPF (Go tier)
+	$(SECTION) "4" "Traces → the Collector" "Three ways to a span, all landing on the Collector: the OTel SDK (Python), Spring's OTLP exporter (Java), and zero-code eBPF (Beyla) for the Go payment tier. Metrics + logs the Collector collects itself (scrape + tail)."
 	$(STEP) "Turn the SDK on for traces and point OTLP at the Collector (metrics/logs exporters OFF — the Collector handles those)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_PROTOCOL=grpc OTEL_EXPORTER_OTLP_ENDPOINT=$(COLLECTOR) MANAGEMENT_TRACING_ENABLED=true MANAGEMENT_OTLP_TRACING_ENDPOINT=http://otel-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
+	$(STEP) "Deploy Grafana Beyla (eBPF) for the Go tier (gateway/payment/upi) → the Collector (traces/beyla.yaml)" \
+	        "kubectl apply -f traces/beyla.yaml && kubectl -n $(OBS_NS) rollout status daemonset/beyla --timeout=180s"
 	@echo ""
-	@echo "  ✓ Python traces → Collector :4317 (gRPC); Java/Spring traces → Collector :4318 (HTTP)."
+	@echo "  ✓ Python traces → Collector :4317 (gRPC); Java/Spring → :4318 (HTTP); Go tier → Beyla eBPF → Collector :4318."
+	@echo "    The Go hops (gateway-service/payment-gateway/upi-service) now appear in the payment waterfall."
 	@echo "    Metrics come from the Collector SCRAPING /metrics; logs from it TAILING pod logs."
 	@echo "    Generate traffic, then verify:  make traffic && make verify"
 
-all: backends enable-remote-write collector app-otel ## 1→4 in order (the whole OTel pipeline)
+all: backends enable-remote-write collector traces ## 1→4 in order (the whole OTel pipeline)
 	@echo ""
 	@echo "═══ Done, via OpenTelemetry. ONE Collector → Prometheus + Loki + Jaeger ═══"
 	@echo "    Generate load (make traffic), then make verify. Then: make observe"
@@ -229,9 +232,11 @@ _url:
 	 [ -z "$$IP" ] && IP=localhost; \
 	 printf "  %-10s http://%s:%s\n" "$(NAME)" "$$IP" "$(HP)"
 
-clean: ## Remove the Collector + revert the app (backends stay; use ../make clean to remove them)
+clean: ## Remove the Collector + Beyla + revert the app (backends stay; use ../make clean to remove them)
 	$(STEP) "Uninstall the OpenTelemetry Collector" \
 	        "helm -n $(OBS_NS) uninstall otel-collector 2>/dev/null || true"
+	$(STEP) "Remove Beyla (DaemonSet + its cluster RBAC)" \
+	        "kubectl delete -f traces/beyla.yaml --ignore-not-found 2>/dev/null || true"
 	$(STEP) "Revert the app env (SDK off, clear the OTLP exporters + endpoint)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=true OTEL_TRACES_EXPORTER- OTEL_METRICS_EXPORTER- OTEL_LOGS_EXPORTER- OTEL_EXPORTER_OTLP_PROTOCOL- OTEL_EXPORTER_OTLP_ENDPOINT- MANAGEMENT_TRACING_ENABLED- || true"
 	@echo "  ✓ Collector gone, app back to a blank slate."
