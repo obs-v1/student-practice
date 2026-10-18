@@ -23,9 +23,9 @@ used (see [`collector/values.yaml`](../collector/values.yaml)): keep pods in nam
 with `prometheus.io/scrape=true`, read `prometheus.io/path` + `prometheus.io/port`, and relabel
 `app` / `namespace` / `pod` onto every series.
 
-That is why you run **`make enable-annotations-to-deploy` before `make -C bankobs deploy`**: the
-annotations tell the Collector *where* each service's `/metrics` lives. Without them the Collector
-has nothing to scrape.
+That is why **`make enable-annotations-to-deploy`** adds the annotation **and then deploys** the app
+in one step: the annotations tell the Collector *where* each service's `/metrics` lives. Without them
+the Collector has nothing to scrape.
 
 ## Prometheus becomes a sink (no double collection)
 

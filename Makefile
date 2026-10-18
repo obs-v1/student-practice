@@ -133,12 +133,16 @@ metrics: ## 2. Prometheus (Helm) scrapes /metrics directly (no OTel)
 	@echo "    prometheus.io/scrape annotation. Opt one in (docs/02), or 'make enable-annotations-to-deploy'."
 	@$(MAKE) -s _url HP=9090 NAME=Prometheus
 
-enable-annotations-to-deploy: ## Turn the app's observability on before deploy: scrape annotations + Go-tier tracing
+enable-annotations-to-deploy: ## Enable the app's observability (scrape annotations + Go-tier tracing) AND deploy it
 	$(STEP) "Uncomment prometheus.io/scrape on every service + set the Go tier's OBSERVABILITY_MODE=full" \
 	        "bash scripts/scrape-annotations.sh on"
-	@echo "  ✓ metrics opt-in + Go-tier tracing enabled. Now apply it:  make app"
-	@echo "    (the Go payment tier is OTel-instrumented in code; OBSERVABILITY_MODE=full lets it export"
-	@echo "     spans whose trace id matches its logs, so trace->logs works for it too — no eBPF needed.)"
+	@echo "  ✓ metrics opt-in + Go-tier tracing enabled — now deploying the app with it baked in"
+	@echo "    (first run pulls images + waits on Oracle: budget 15–40 min)…"
+	@$(MAKE) --no-print-directory app
+	@echo ""
+	@echo "  ✓ app deployed (dark). The Go payment tier is OTel-instrumented in code; OBSERVABILITY_MODE=full"
+	@echo "    lets it export spans whose trace id matches its logs, so trace->logs works for it too — no eBPF."
+	@echo "    Next: make -C bankobs wait   (block until the data stores are Ready + seeded)"
 
 disable-annotations-to-deploy: ## Reverse of enable-annotations-to-deploy: re-comment the annotation in all service charts
 	$(STEP) "Re-comment the prometheus.io/scrape annotation in every service's deployment.yaml" \
@@ -178,7 +182,7 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	@echo "    trace->logs correlates for the payment tier too. Generate traffic, then: make verify-traces"
 	@$(MAKE) -s _url HP=16686 NAME=Jaeger
 
-all: enable-annotations-to-deploy app metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars)
+all: enable-annotations-to-deploy metrics logs traces ## 1→4 in order (the by-hand build of the 3 pillars; enable-annotations-to-deploy also deploys the app)
 	@echo ""
 	@echo "═══ Done. Services opted into scraping; metrics in Prometheus, logs in Loki, traces in Jaeger ═══"
 	@echo "    Next: make grafana && make datasources && make golden-dashboard && make traffic-bg"

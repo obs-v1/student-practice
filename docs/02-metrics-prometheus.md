@@ -72,8 +72,9 @@ instead: `kubectl -n bankobs patch deploy upi-service --type=merge -p
 '{"spec":{"template":{"metadata":{"annotations":{"prometheus.io/scrape":"true","prometheus.io/path":"/metrics","prometheus.io/port":"8011"}}}}}'`.)
 
 Do it for a few services, or all of them — each one you opt in shows up in Prometheus. To
-opt in **every** service at once (uncomments the annotation in all the charts), there's a
-shortcut: `make enable-annotations-to-deploy` then `make app` (and `make disable-annotations-to-deploy` reverses it).
+opt in **every** service at once, there's a shortcut: `make enable-annotations-to-deploy`
+(uncomments the annotation in all the charts, turns the Go tier's tracing on, **and deploys the
+app** — `make disable-annotations-to-deploy` reverses the opt-in).
 
 ## Check Prometheus
 

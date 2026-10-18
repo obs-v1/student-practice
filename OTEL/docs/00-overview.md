@@ -64,8 +64,7 @@ terraform output -raw public_ip     # the lab box's public IP
 
 # ── SSH into the lab box (user: ec2-user, password: DevOps321), then: ──
 cd ~/student-practice
-make enable-annotations-to-deploy   # mark every service's /metrics so the Collector can find it
-make -C bankobs deploy              # deploy the 75-service app   (first run pulls images ~30–40 min)
+make enable-annotations-to-deploy   # mark every /metrics + enable the Go tier, THEN deploy the 75-service app (first run ~30–40 min)
 make -C bankobs wait                # block until the datastores are Ready + seeded
 
 make -C OTEL all                    # backends (Prom+Loki+Jaeger) + remote-write + Collector + app traces
@@ -84,14 +83,15 @@ make -C OTEL verify                 # sanity: Collector flowing? metric names? l
 
 ### Why the annotations step
 `make enable-annotations-to-deploy` opts every service into scraping by adding
-`prometheus.io/scrape|path|port` to its pod. The Collector's `prometheus` receiver reads those
-annotations to know **where** each `/metrics` is. Run it **before** `make -C bankobs deploy` so
-the annotations are baked into the one deploy (no re-roll). See [02](02-metrics-with-otel.md).
+`prometheus.io/scrape|path|port` to its pod (and turns the Go tier's `OBSERVABILITY_MODE` to `full`),
+then **deploys the app** so both are baked into the one deploy (no re-roll). The Collector's
+`prometheus` receiver reads those annotations to know **where** each `/metrics` is.
+See [02](02-metrics-with-otel.md).
 
 ## Prerequisite recap
 
 - A kind cluster + the `bankobs` app, both on the lab box (`make tf-apply` gives you the
-  cluster; `make -C bankobs deploy` gives you the app).
+  cluster; `make enable-annotations-to-deploy` gives you the app).
 - This module does **not** re-create the cluster or re-deploy the app — it changes *how*
   telemetry is collected.
 

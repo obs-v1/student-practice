@@ -33,8 +33,8 @@ Assumes the parent lab's **cluster + bankobs app are up** — and, for the Colle
 
 ```bash
 # on the lab box, from ~/student-practice:
-make enable-annotations-to-deploy    # so the Collector can discover each service's /metrics
-make -C bankobs deploy               # (if not already) deploy the app with annotations baked in
+make enable-annotations-to-deploy    # opt /metrics in + enable the Go tier, then deploy the app (if not already)
+make -C bankobs wait                 # block until the datastores are Ready + seeded
 
 make -C OTEL all                     # backends + remote-write + Collector + app traces
 make -C OTEL observe                 # Grafana (admin/admin) + datasources + Golden/Errors dashboards
