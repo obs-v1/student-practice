@@ -63,6 +63,7 @@ already written, **commented out**, waiting for you:
 Uncomment it, then redeploy the app so the change lands:
 
 ```bash
+make enable-annotations-to-deploy # Uncomment for all the services at once.
 make app          # helm upgrade — rolls upi-service with the annotation
 ```
 
