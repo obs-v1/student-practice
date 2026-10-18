@@ -3,11 +3,19 @@
 # and the overview dashboard all ride in here, installed with one `helm upgrade -i`.
 #
 # The correlation is the point:
-#   - Jaeger "tracesToLogsV2": from a span, open that service's logs in Loki (trace->logs BY SERVICE,
-#     mapping the span's service.name onto Loki's `app` label).
-# We correlate by service, NOT by trace id, on purpose: bankobs logs do not carry Jaeger's trace id
-# (the Go/journey tier logs an app trace_id that does not match Beyla's span ids; the Java core-banking
-# tier logs only a correlation_id), so a trace-id log search returns nothing.
+#   - Jaeger "tracesToLogsV2": from a span, the "Related logs" button opens Loki at the span's
+#     time window (trace->logs BY TIME WINDOW; you narrow to the service by hand).
+#
+# Why time-window and not an automatic by-service/by-trace-id jump — this is the by-hand lesson:
+#   - NOT by trace id: bankobs logs do not carry Jaeger's trace id (the Go/journey tier logs an app
+#     trace_id that does not match Beyla's span ids; the Java core-banking tier logs only a
+#     correlation_id), so a trace-id log search returns nothing.
+#   - NOT automatically by service either: the classic Jaeger data source stores a span's service in
+#     `process.serviceName`, NOT as a span tag, and Grafana's trace->logs cannot read it (the custom
+#     query exposes ${__span.spanId|name|tags...} but no serviceName, and `service.name` is not in
+#     ${__span.tags}). So the button can only hand Loki a *time window*; you finish the hop yourself by
+#     typing the service, e.g. {app="account-service"}. (The OTEL module's collector makes this one
+#     click — that contrast is the point of doing it by hand here.)
 
 # Pin Grafana to the latest 13.x (chart appVersion still tracks 12.x, so override the image tag).
 image:
@@ -58,11 +66,10 @@ datasources:
             datasourceUid: loki
             spanStartTimeShift: '-5m'
             spanEndTimeShift: '5m'
-            filterByTraceID: false
+            filterByTraceID: false        # logs do not carry Jaeger's trace id
             filterBySpanID: false
-            tags:
-              - key: service.name
-                value: app
+            customQuery: true             # a tag map on service.name can't resolve (see header) — so
+            query: '{namespace="bankobs"}'  # open Loki at the span's window; narrow to {app="<svc>"} by hand
 
 dashboardProviders:
   dashboardproviders.yaml:

@@ -46,7 +46,8 @@ your pivot into the logs.
 > **We pivot by service, not by trace id.** bankobs logs don't carry Jaeger's trace id (the Go tier
 > logs an app `trace_id` that doesn't match Beyla's span ids; the Java tier logs a `correlation_id`),
 > so a `|= "<trace_id>"` log search returns nothing. If you've run `make datasources`, the Jaeger
-> span's **"Logs for this span"** button does this pivot for you (service.name → Loki `app`).
+> span's **"Related logs"** button opens Loki at the span's time window (`{namespace="bankobs"}`) —
+> add `app="<service>"` to narrow it (Jaeger can't pass Loki the service name for you).
 
 **Root cause:** `upi-service` is down; `payment-gateway`/`gateway-service` can't reach it, so they
 return **502 `ERR_UPSTREAM`**.

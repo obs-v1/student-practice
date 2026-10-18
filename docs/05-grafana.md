@@ -34,8 +34,9 @@ Open it (`make urls` → Grafana, `http://<box>:3000`). Sign in at the login pag
 
 > **In a hurry?** `make datasources` registers all three at once via the Grafana API
 > (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the **trace → logs**
-> correlation — Jaeger's "Logs for this span" opens that service's logs in Loki (by service, see
-> below for why). Do it by hand once (below) to understand what a datasource is, then use the
+> correlation — a Jaeger span grows a **"Related logs"** button that opens Loki at that span's time
+> window; you narrow to the service yourself (see below for why it can't do that for you). Do it by
+> hand once (below) to understand what a datasource is, then use the
 > target thereafter. (`make correlation` is the fully-provisioned variant with an overview
 > dashboard baked in.)
 
@@ -85,8 +86,8 @@ Two things to know:
 - **These live in Grafana's database**, which in this lab is **not persisted** — restart the
   Grafana pod and your datasources are gone. In production you don't click them in each time;
   you **provision** them from a file so they come back automatically.
-- Provisioning is also how you wire the **trace → logs correlation** (click from a Jaeger span
-  to that service's Loki logs) — fiddly to set up by hand, trivial as config.
+- Provisioning is also how you wire the **trace → logs correlation** (the "Related logs" button on a
+  Jaeger span, which opens Loki at the span's time window) — fiddly to set up by hand, trivial as config.
 
 That's exactly what the [`correlation/`](../correlation/README.md) module does: `make
 correlation` installs the *same* Grafana but with all three datasources **and** the trace → logs
@@ -161,10 +162,18 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
 
 - **By hand (what you have now):** read the **service** off the Jaeger span and query
   `{app="<service>"}` in Loki for the same window. Works, but it is two steps.
-- **One click (`make datasources` / `make correlation`):** this provisions the Jaeger datasource
-  with `tracesToLogsV2`, so a span grows a **"Logs for this span"** button that opens that
-  service's Loki logs for the window automatically — the same journey, mapped from the span's
-  `service.name` onto Loki's `app` label.
+- **Button + one narrow (`make datasources` / `make correlation`):** this provisions the Jaeger
+  datasource with `tracesToLogsV2`, so an expanded span grows a **"Related logs"** button. Click it
+  and Loki opens at the span's **time window** (`{namespace="bankobs"}`) — then you still add the
+  service: `{app="<service>"}`. The button saves you the time-range juggling, not the service step.
+
+> **Why the button can't jump straight to the service's logs.** The classic **Jaeger** datasource
+> keeps a span's service in `process.serviceName`, *not* as a span tag — and Grafana's trace→logs has
+> no way to read it: a `service.name` tag mapping resolves to nothing (so no button renders at all),
+> and the custom-query variables expose `${__span.spanId}`, `${__span.name}`, `${__span.tags…}` but
+> **no** service name. So the automated hop can only hand Loki a time window; you supply the service.
+> (Wire the *same* app through the OTEL module's collector and this becomes a true one-click,
+> trace-id-scoped jump — the contrast is the lesson.)
 
 ### No traces? Metrics → logs still gets you most of the way
 
