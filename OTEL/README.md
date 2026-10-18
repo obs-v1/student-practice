@@ -69,9 +69,11 @@ make -C OTEL fault NAME=latency TARGET=eligibility-engine # Drill 2 — slow DOW
   the names stay `http_requests_total` / `http_server_requests_total` (labels `app`/`status`) and
   the **parent Golden Signals dashboards work unchanged**. (An OTel-SDK app would get semconv
   names instead.)
-- **Trace→logs is by service, not trace id.** bankobs logs carry `correlation_id`, not an OTel
-  `trace_id`, so the Jaeger "Trace to logs" link opens the service's logs in the span's time
-  window. See [`docs/03`](docs/03-logs-with-otel.md).
+- **Trace↔logs is by trace id, with partial coverage.** The Jaeger "Related logs" button queries
+  Loki for the span's trace id — exact-match for the Spring journey tier (`loan-origination`, …) that
+  logs a matching `trace_id`, empty for the Go tier (no spans here) and non-logging services (narrow
+  by `{k8s_container_name="<svc>"}`). The Collector forwards logs; it doesn't inject trace ids — the
+  gap is the lesson. See [`docs/03`](docs/03-logs-with-otel.md) / [`docs/05`](docs/05-grafana.md).
 
 Full walk-through in [`docs/`](docs/00-overview.md): 00 overview → 01 collector → 02 metrics →
 03 logs → 04 traces → 05 grafana → 06 incident-drills → 07 why-this-vs-by-hand.

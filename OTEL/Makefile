@@ -123,7 +123,8 @@ all: backends enable-remote-write collector app-otel ## 1→4 in order (the whol
 #  SECTION 5 — GRAFANA: one pane over the three backends (REUSED from the parent lab)
 #  The Collector preserves the Prometheus-client metric names + labels (app/status/handler),
 #  so the parent's Golden Signals + Errors dashboards and datasource wiring work unchanged.
-#  Only trace<->logs correlation differs (by service, not trace_id) — see OTEL/scripts.
+#  trace<->logs is still by trace id — only the Loki labels (k8s_*) and the Collector's escaped
+#  log body differ from the by-hand wiring — see OTEL/scripts/add-datasources.sh.
 # ───────────────────────────────────────────────────────────────────────────────
 grafana: ## 5. Grafana (Helm) — same install as the parent lab (admin/admin login)
 	$(SECTION) "5" "Grafana" "A single pane over Prometheus + Loki + Jaeger — all fed by the Collector."
@@ -133,11 +134,12 @@ grafana: ## 5. Grafana (Helm) — same install as the parent lab (admin/admin lo
 	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f $(PARENT)/grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
 	@$(MAKE) -s _url HP=3000 NAME=Grafana
 
-datasources: ## Register Prometheus+Loki+Jaeger + wire trace→logs BY SERVICE (OTEL-specific)
-	$(STEP) "Register the three datasources + trace→logs-by-service correlation (OTEL/scripts/add-datasources.sh)" \
+datasources: ## Register Prometheus+Loki+Jaeger + wire trace↔logs BY TRACE ID (OTEL labels)
+	$(STEP) "Register the three datasources + trace↔logs-by-trace-id correlation (OTEL/scripts/add-datasources.sh)" \
 	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
-	@echo "  ✓ datasources added. Trace→logs opens the service's logs around the span's time"
-	@echo "    (logs carry correlation_id/k8s_container_name, not trace_id — see docs/04)."
+	@echo "  ✓ datasources added + trace↔logs wired by trace id (span 'Related logs' → Loki |= traceId;"
+	@echo "    log trace_id → Jaeger). Exact-match for the journey tier; empty elsewhere — narrow"
+	@echo "    with {k8s_container_name=\"<svc>\"}. See docs/05."
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards (parent lab's — names match)
 	$(STEP) "Import the Golden Signals + per-service Errors dashboards" \

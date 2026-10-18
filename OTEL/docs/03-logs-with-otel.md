@@ -38,21 +38,26 @@ make -C OTEL verify-logs       # lists the stream labels Loki has seen
 {k8s_container_name="account-service"}
 ```
 
-`k8s_container_name` is the service name — the label the trace→logs drill uses ([05](05-grafana.md)).
+`k8s_container_name` is the service name — the label you narrow to when the trace→logs drill
+lands empty ([05](05-grafana.md)).
 
-## The correlation reality: `correlation_id`, not `trace_id`
+## The correlation reality: by trace id, but only partially
 
-bankobs's JSON logs carry a **`correlation_id`** (a per-request id), **not** an OpenTelemetry
-`trace_id`. So you **cannot** join a trace to its logs by trace id here. Two consequences, both
-designed around in [05](05-grafana.md):
+Trace↔logs here is wired **by trace id** (same as the by-hand lab) — and that works, *for the
+services that actually log a trace id*. The honest, verified picture:
 
-- **Trace → logs** is wired **by service + time window** (open the service's logs around the
-  span's time), not by trace id.
-- A Loki **derived field** surfaces `correlation_id` so you can pivot from one log line to every
-  other line of the same request.
+- **Journey-tier services** (`loan-origination`, `notification-orchestrator`, `remittance-service`)
+  log an OpenTelemetry **`trace_id`** that matches the one in Jaeger → a span's "Related logs" button
+  lands on that **exact request's** log lines, and a log's `trace_id` links back to its trace.
+- **The Go tier** (`gateway-service`, `payment-gateway`) has no in-code OTel and **no Beyla in this
+  module**, so it emits **no spans at all** — nothing to correlate (its logs carry their own
+  `trace_id`/`correlation_id` that Jaeger never sees).
+- **Most other services** don't log a trace id, so trace→logs comes back empty — there you drop the
+  `|= "<id>"` filter and narrow by `{k8s_container_name="<service>"}`.
 
-This is the honest situation for an app whose logging predates trace-context injection — and it
-is a good lesson: the Collector collects the logs happily, but *correlation quality* depends on
-what the app actually writes.
+The key lesson: **the Collector forwards the app's existing logs — it does not inject the trace id
+into them.** Correlation quality depends on what the app writes, not on adding a collector. Full
+one-click-everywhere correlation needs the app itself to use an OTel log appender that stamps the
+trace id into every line (bankobs doesn't) — [05](05-grafana.md) shows the drill and that caveat.
 
 ➡ Next: [04-traces-with-otel.md](04-traces-with-otel.md)

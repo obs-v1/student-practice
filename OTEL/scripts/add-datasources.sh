@@ -5,13 +5,21 @@
 #
 #   OBS_NS=monitoring bash OTEL/scripts/add-datasources.sh
 #
-# WHY A SEPARATE SCRIPT (correlation differs from the by-hand lab):
-#   In this module logs are collected by the Collector's filelog receiver and land in Loki with
-#   k8s_* stream labels (k8s_container_name = the service name). The app's JSON logs carry a
-#   `correlation_id`, NOT an OTel `trace_id`, so we CANNOT join a trace to its logs by trace id.
-#   Instead we correlate by SERVICE + TIME WINDOW: clicking a span opens Loki filtered to that
-#   service's logs ({k8s_container_name="<service>"}) around the span's time. That is the honest,
-#   working correlation for an app whose logs predate trace-id injection.
+# WHY A SEPARATE SCRIPT (two OTEL-specific differences from the by-hand ../scripts/add-datasources.sh):
+#   (1) Loki stream labels here are k8s_* (the Collector's loki exporter), so the namespace label is
+#       k8s_namespace_name and the service label is k8s_container_name (not `namespace`/`app`).
+#   (2) The Collector wraps each log line as {"body":"<escaped JSON>"}, so a trace id appears as
+#       \"trace_id\":\"<hex>\" — the derived-field regex must match THROUGH the escaping.
+# Correlation is still BY TRACE ID, both directions (same as the by-hand lab): a span's "Related logs"
+# button queries Loki for the span's trace id, and a log line's trace_id links back to its Jaeger
+# trace. COVERAGE is partial and that IS a lesson: the Collector FORWARDS the app's existing logs, it
+# does NOT inject trace ids. So the exact-request jump resolves only where the app itself logs a trace
+# id that Jaeger also has — the journey tier (loan-origination, notification-orchestrator,
+# remittance-service; verified their logged trace_id is in Jaeger). It's empty for the Go tier
+# (no in-code OTel and NO Beyla in this module, so gateway-service/payment-gateway emit no spans at
+# all) and for services that don't log a trace id. When empty, drop the `|= "<id>"` and narrow by
+# {k8s_container_name="<service>"}. (Real full correlation needs the app to use an OTel log appender
+# that stamps the trace id into every line — bankobs doesn't; that gap is the point.)
 #
 # In-cluster URLs (monitoring namespace): prometheus -> http://prometheus-server (default),
 # loki -> http://loki:3100, jaeger -> http://jaeger:16686.
@@ -72,37 +80,38 @@ for ds in WANT:
     print(f"  {'✓' if ok else '✗'} {ds['name']:11} -> {ds['url']}  ({'uid '+str(uid) if ok else resp.get('message', resp)})")
     rc = rc or (0 if ok else 1)
 
-# Correlation: Jaeger "Trace to logs" -> Loki, BY SERVICE (not trace id). Grafana maps the span's
-# service.name to the Loki stream label k8s_container_name and opens the logs for that service in
-# the span's time window.
+# Correlation BY TRACE ID, both directions (see header for the coverage caveat).
 if uids.get("jaeger") and uids.get("loki"):
+    # Jaeger -> Loki (trace -> logs): query Loki for the span's trace id. `|=` substring-matches the
+    # hex inside the Collector's {"body":"..."} envelope; namespace label here is k8s_namespace_name.
     jbody = {**WANT[2], "uid": uids["jaeger"],
              "jsonData": {
                  "tracesToLogsV2": {
                      "datasourceUid": uids["loki"],
-                     "spanStartTimeShift": "-2m", "spanEndTimeShift": "2m",
+                     "spanStartTimeShift": "-5m", "spanEndTimeShift": "5m",
                      "filterByTraceID": False, "filterBySpanID": False,
-                     "tags": [{"key": "service.name", "value": "k8s_container_name"}],
+                     "customQuery": True,
+                     "query": '{k8s_namespace_name="bankobs"} |= "${__trace.traceId}"',
                  }}}
     st, _ = call("PUT", f"/api/datasources/uid/{uids['jaeger']}", jbody)
-    print(f"  {'✓' if st==200 else '✗'} jaeger  Trace-to-logs -> loki (by service: k8s_container_name)  ({'ok' if st==200 else st})")
+    print(f"  {'✓' if st==200 else '✗'} jaeger  Trace-to-logs -> loki  (query Loki for the trace id)  ({'ok' if st==200 else st})")
     rc = rc or (0 if st==200 else 1)
 
-    # Loki -> Jaeger derived field: surface correlation_id (the app's request id) as a clickable
-    # field. It is NOT a trace id, so it does not deep-link into a trace, but it lets you pivot
-    # from a log line to every other line of the same request.
+    # Loki -> Jaeger (logs -> trace): the body is wrapped+escaped, so trace_id reads \"trace_id\":\"<hex>\".
+    # `trace_id\W+(\w+)` matches the id through the \":\" separators (the by-hand '"trace_id":"..."' does not).
     lbody = {**WANT[1], "uid": uids["loki"],
              "jsonData": {
                  "derivedFields": [{
-                     "name": "correlation_id",
-                     "matcherRegex": r'"correlation_id":"([^"]+)"',
-                     "url": "",
+                     "name": "TraceID",
+                     "matcherRegex": r'trace_id\W+(\w+)',
+                     "url": "${__value.raw}",
+                     "datasourceUid": uids["jaeger"],
                  }]}}
     st, _ = call("PUT", f"/api/datasources/uid/{uids['loki']}", lbody)
-    print(f"  {'✓' if st==200 else '✗'} loki    Derived-field correlation_id  ({'ok' if st==200 else st})")
+    print(f"  {'✓' if st==200 else '✗'} loki    Derived-field trace_id -> jaeger  ({'ok' if st==200 else st})")
     rc = rc or (0 if st==200 else 1)
 
-print("  datasources registered + trace->logs wired by service (prometheus is the default)." if rc == 0
+print("  datasources registered + trace<->logs wired by trace id (prometheus is the default)." if rc == 0
       else "  ⚠ something failed — see above.")
 sys.exit(rc)
 PY
