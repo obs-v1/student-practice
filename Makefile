@@ -201,7 +201,7 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 datasources: ## Register Prometheus + Loki + Jaeger datasources in one shot (instead of the UI)
 	$(STEP) "Register all three datasources via the Grafana API (prometheus=default, loki, jaeger)" \
 	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
-	@echo "  ✓ datasources added + trace→logs wired (Jaeger span 'Related logs' → Loki at the span's window; narrow with {app=\"<svc>\"})."
+	@echo "  ✓ datasources added + trace↔logs wired by trace id (span 'Related logs' → Loki |= traceId; log trace_id → Jaeger). Exact-match for the journey tier; empty for Beyla/Go + Python/Java — narrow with {app=\"<svc>\"}."
 	@echo "    Try them in Explore, or run 'make golden-dashboard'."
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)

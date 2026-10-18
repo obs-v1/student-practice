@@ -73,10 +73,11 @@ curl -s --get 'http://<box>:3100/loki/api/v1/query_range' \
 ```
 
 To actually *view* logs you'd point Grafana at Loki — the optional
-[`correlation/`](../correlation/README.md) module (`make correlation`) does exactly that, and lets
-you jump from a trace in Jaeger to Loki at that span's time window, where you narrow by service with
-`{app="<service>"}` (Jaeger can't pass Loki the service name, and bankobs logs don't share Jaeger's
-trace id — see `docs/05` and the correlation README).
+[`correlation/`](../correlation/README.md) module (`make correlation`) does exactly that, and wires
+trace↔logs by **trace id**: from a Jaeger span you jump to that request's Loki lines (for the
+journey-tier services that log the same trace id Jaeger has — elsewhere it's empty and you narrow by
+`{app="<service>"}`), and a log line's `trace_id` links back to its trace. See `docs/05` + the
+correlation README for why that coverage is partial.
 
 ## Two pillars down, still no OTel
 

@@ -43,11 +43,12 @@ your pivot into the logs.
 (or `{app="payment-gateway"}`). You'll find the real message — **`ERR_UPSTREAM` /
 `dial tcp …:8011: connect: connection refused`**. That's upi-service being unreachable.
 
-> **We pivot by service, not by trace id.** bankobs logs don't carry Jaeger's trace id (the Go tier
-> logs an app `trace_id` that doesn't match Beyla's span ids; the Java tier logs a `correlation_id`),
-> so a `|= "<trace_id>"` log search returns nothing. If you've run `make datasources`, the Jaeger
-> span's **"Related logs"** button opens Loki at the span's time window (`{namespace="bankobs"}`) —
-> add `app="<service>"` to narrow it (Jaeger can't pass Loki the service name for you).
+> **Here we pivot by service, not by trace id.** If you've run `make datasources`, a span's
+> **"Related logs"** button queries Loki for the span's trace id — but this Go payment tier
+> (`gateway-service`/`payment-gateway`) is traced by **Beyla**, which mints its own trace ids, so the
+> button comes back **empty** (their logged `trace_id` doesn't match Jaeger's). Drop the `|= "<id>"`
+> and scope by `{app="<service>"}` instead. The trace-id button *does* land on the exact request for
+> journey-tier services like `loan-origination` that log a matching id — see docs/05 for the split.
 
 **Root cause:** `upi-service` is down; `payment-gateway`/`gateway-service` can't reach it, so they
 return **502 `ERR_UPSTREAM`**.

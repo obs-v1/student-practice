@@ -33,12 +33,12 @@ Open it (`make urls` → Grafana, `http://<box>:3000`). Sign in at the login pag
 ## Add the three datasources (by hand)
 
 > **In a hurry?** `make datasources` registers all three at once via the Grafana API
-> (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the **trace → logs**
-> correlation — a Jaeger span grows a **"Related logs"** button that opens Loki at that span's time
-> window; you narrow to the service yourself (see below for why it can't do that for you). Do it by
-> hand once (below) to understand what a datasource is, then use the
-> target thereafter. (`make correlation` is the fully-provisioned variant with an overview
-> dashboard baked in.)
+> (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the **trace ↔ logs**
+> correlation — a Jaeger span grows a **"Related logs"** button that queries Loki for that span's
+> **trace id**, and a log line's `trace_id` links back to its trace (it lands on the exact request for
+> the services that log a matching id; see below). Do it by hand once (below) to understand what a
+> datasource is, then use the target thereafter. (`make correlation` is the fully-provisioned variant
+> with an overview dashboard baked in.)
 
 In Grafana, go to **Connections → Data sources → Add data source** (the ☰ menu on the left, or
 the URL `/connections/datasources/new`). You'll do this three times. Each datasource is just:
@@ -86,8 +86,9 @@ Two things to know:
 - **These live in Grafana's database**, which in this lab is **not persisted** — restart the
   Grafana pod and your datasources are gone. In production you don't click them in each time;
   you **provision** them from a file so they come back automatically.
-- Provisioning is also how you wire the **trace → logs correlation** (the "Related logs" button on a
-  Jaeger span, which opens Loki at the span's time window) — fiddly to set up by hand, trivial as config.
+- Provisioning is also how you wire the **trace ↔ logs correlation** (the "Related logs" button on a
+  Jaeger span → Loki filtered to the trace id, and a log's `trace_id` → its trace) — fiddly to set up
+  by hand, trivial as config.
 
 That's exactly what the [`correlation/`](../correlation/README.md) module does: `make
 correlation` installs the *same* Grafana but with all three datasources **and** the trace → logs
@@ -148,11 +149,14 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
    (e.g. `ERR_UPSTREAM`, `connection refused`, `relation ... does not exist`). That is your
    **why**.
 
-> **Why by service, not by trace id?** You might expect to paste the span's trace id into Loki and
-> get *exactly* that request's lines. That needs the **same trace id** in both the span and the log
-> — and bankobs doesn't provide it: the Go/journey tier logs an app `trace_id` that doesn't match
-> Beyla's span ids, and the Java core-banking tier logs only a `correlation_id`. So a trace-id log
-> search returns nothing. You scope by the **service** instead.
+> **Could you use the trace id here instead of the service?** Not for *this* incident. The
+> `make datasources`/`make correlation` wiring does give a span a **"Related logs"** button that
+> queries Loki for the span's trace id (`{namespace="bankobs"} |= "<traceId>"`), and it lands on the
+> exact request's lines for **journey-tier** services that log a matching id (`loan-origination`,
+> `remittance-service`, …). But the Go payment tier you're chasing here (`upi-service`,
+> `payment-gateway`, `gateway-service`) is traced by **Beyla**, which mints its *own* trace ids — so
+> their logged `trace_id` never matches Jaeger's and the button comes back empty. That's why, for this
+> drill, you pivot by **service**. (More on the coverage split just below.)
 
 > **The Loki stream label is `app`, not `service`.** Use `{app="upi-service"}` (the `service`
 > value also lives *inside* the JSON line, reachable with `| json | service="upi-service"`, but it
@@ -161,19 +165,20 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
 ### Two ways to make the trace → logs hop
 
 - **By hand (what you have now):** read the **service** off the Jaeger span and query
-  `{app="<service>"}` in Loki for the same window. Works, but it is two steps.
-- **Button + one narrow (`make datasources` / `make correlation`):** this provisions the Jaeger
-  datasource with `tracesToLogsV2`, so an expanded span grows a **"Related logs"** button. Click it
-  and Loki opens at the span's **time window** (`{namespace="bankobs"}`) — then you still add the
-  service: `{app="<service>"}`. The button saves you the time-range juggling, not the service step.
+  `{app="<service>"}` in Loki for the span's window. Always works; two steps.
+- **Trace-id button (`make datasources` / `make correlation`):** provisions the Jaeger datasource with
+  `tracesToLogsV2`, so an expanded span grows a **"Related logs"** button that queries Loki for the
+  span's trace id (`{namespace="bankobs"} |= "<traceId>"`). For a **journey-tier** service it lands on
+  that exact request's lines; for the Go payment tier (Beyla) and the Python/Java tiers (no logged
+  trace id) it's **empty** — drop the `|= "<id>"` and narrow by `{app="<service>"}`. The reverse is
+  wired too: a log line's `trace_id` is a link back to its Jaeger trace.
 
-> **Why the button can't jump straight to the service's logs.** The classic **Jaeger** datasource
-> keeps a span's service in `process.serviceName`, *not* as a span tag — and Grafana's trace→logs has
-> no way to read it: a `service.name` tag mapping resolves to nothing (so no button renders at all),
-> and the custom-query variables expose `${__span.spanId}`, `${__span.name}`, `${__span.tags…}` but
-> **no** service name. So the automated hop can only hand Loki a time window; you supply the service.
-> (Wire the *same* app through the OTEL module's collector and this becomes a true one-click,
-> trace-id-scoped jump — the contrast is the lesson.)
+> **Why the trace-id jump is only partial — the lesson.** Landing on the *exact* lines needs the
+> **same trace id** in the span and the log. bankobs manages that only where a service runs the OTel
+> SDK in-code and stamps its trace id into its own logs (the journey tier). Beyla-traced Go services
+> get a *different* id in Jaeger than they log; the Python/Java tiers log no id at all. There is no one
+> id crossing every hop — which is exactly what a unified OTel stack (collector + SDK log-correlation)
+> provides, turning this into a reliable one-click jump everywhere. Feeling that gap by hand is the point.
 
 ### No traces? Metrics → logs still gets you most of the way
 

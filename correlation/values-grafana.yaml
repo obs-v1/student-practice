@@ -2,20 +2,20 @@
 # backends. Replaces the hand-written Deployment/ConfigMaps; datasources, correlation wiring
 # and the overview dashboard all ride in here, installed with one `helm upgrade -i`.
 #
-# The correlation is the point:
-#   - Jaeger "tracesToLogsV2": from a span, the "Related logs" button opens Loki at the span's
-#     time window (trace->logs BY TIME WINDOW; you narrow to the service by hand).
+# The correlation is the point (both directions):
+#   - Loki  "derivedFields": pull "trace_id" out of each JSON log line -> link to Jaeger (logs->trace)
+#   - Jaeger "tracesToLogsV2": from a span, the "Related logs" button queries Loki for that trace id
+#     ({namespace="bankobs"} |= "<traceId>")                                            (trace->logs)
 #
-# Why time-window and not an automatic by-service/by-trace-id jump — this is the by-hand lesson:
-#   - NOT by trace id: bankobs logs do not carry Jaeger's trace id (the Go/journey tier logs an app
-#     trace_id that does not match Beyla's span ids; the Java core-banking tier logs only a
-#     correlation_id), so a trace-id log search returns nothing.
-#   - NOT automatically by service either: the classic Jaeger data source stores a span's service in
-#     `process.serviceName`, NOT as a span tag, and Grafana's trace->logs cannot read it (the custom
-#     query exposes ${__span.spanId|name|tags...} but no serviceName, and `service.name` is not in
-#     ${__span.tags}). So the button can only hand Loki a *time window*; you finish the hop yourself by
-#     typing the service, e.g. {app="account-service"}. (The OTEL module's collector makes this one
-#     click — that contrast is the point of doing it by hand here.)
+# NOTE on the `$${...}` escaping below: in a provisioning file Grafana expands `${VAR}` as an ENV var
+# (-> empty), so the trace-to-logs variables MUST be written `$$` (the API path in add-datasources.sh
+# does NOT need this). COVERAGE — tell students honestly: the trace-id jump lands on the EXACT
+# request's logs only where the SAME id is in both the logs and Jaeger: the journey tier
+# (loan-origination, notification-orchestrator, remittance-service, ...). It's EMPTY for the Go payment
+# tier (gateway-service/payment-gateway — Beyla mints its own trace ids) and the Python/Java tiers
+# (they log no trace id). When empty, drop the `|= "<id>"` to get the window and narrow by {app="<svc>"}.
+# That partial coverage IS the lesson: without one consistently-propagated id (what a unified OTel
+# stack gives you) trace<->log correlation only works where you got lucky.
 
 # Pin Grafana to the latest 13.x (chart appVersion still tracks 12.x, so override the image tag).
 image:
@@ -56,6 +56,12 @@ datasources:
         url: http://loki:3100
         jsonData:
           maxLines: 2000
+          derivedFields:                      # logs -> trace: each line's trace_id links to Jaeger
+            - name: TraceID
+              matcherType: regex
+              matcherRegex: '"trace_id":"(\w+)"'
+              url: '$${__value.raw}'
+              datasourceUid: jaeger
       - name: Jaeger
         type: jaeger
         uid: jaeger
@@ -66,10 +72,10 @@ datasources:
             datasourceUid: loki
             spanStartTimeShift: '-5m'
             spanEndTimeShift: '5m'
-            filterByTraceID: false        # logs do not carry Jaeger's trace id
+            filterByTraceID: false            # we grep the id in the line, it's not a stream label
             filterBySpanID: false
-            customQuery: true             # a tag map on service.name can't resolve (see header) — so
-            query: '{namespace="bankobs"}'  # open Loki at the span's window; narrow to {app="<svc>"} by hand
+            customQuery: true
+            query: '{namespace="bankobs"} |= "$${__trace.traceId}"'   # $$ — provisioning env-escape
 
 dashboardProviders:
   dashboardproviders.yaml:

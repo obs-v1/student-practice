@@ -15,33 +15,35 @@ helm upgrade --install grafana grafana/grafana -n monitoring -f correlation/valu
 
 Open Grafana (`make urls` → Grafana, `http://<box>:3000`, log in **admin / admin**):
 - **Dashboard "bankobs — services overview"** — p95 latency / request rate / services up.
-- **Explore → Jaeger** — open a trace, expand a span, and the **"Related logs"** button opens Loki at
-  that span's **time window**. Jaeger can't tell Loki *which* service (see below), so you finish the
-  hop by hand — narrow it to `{app="<service>"}` (e.g. `{app="account-service"}`).
+- **Explore → Jaeger** — open a trace, expand a span, and hit **"Related logs"**: it queries Loki for
+  that span's **trace id** (`{namespace="bankobs"} |= "<traceId>"`). For a **journey-tier** service
+  (e.g. `loan-origination`) you land on that exact request's log lines; for others it comes back empty
+  (see coverage below) — drop the `|= "<id>"` and narrow by `{app="<service>"}` instead.
+- **Explore → Loki** — the reverse: any JSON log line with a `trace_id` field shows a **TraceID** link
+  that opens that trace in Jaeger (logs → trace).
 
 ## What's wired (in `values-grafana.yaml`)
 
 | Datasource | Correlation |
 |---|---|
 | Prometheus (`prometheus-server`) | — |
-| Loki | — (queried directly, or reached from a Jaeger span) |
-| Jaeger | `tracesToLogsV2` (custom query `{namespace="bankobs"}`): from a span, open Loki at that span's time window — you narrow to the service by hand |
+| Loki | `derivedFields`: each line's `trace_id` → a link to its Jaeger trace (**logs → trace**) |
+| Jaeger | `tracesToLogsV2` (custom query `{namespace="bankobs"} |= "$${__trace.traceId}"`): a span → Loki filtered to that trace id (**trace → logs**) |
 
-> **Why a time-window jump, and not a one-click by-service or by-trace-id jump.** You might expect the
-> button to land on the *exact* log lines of that request, or at least that one service's logs. Neither
-> is reachable here, and that's the lesson:
-> - **Not by trace id** — that needs the **same trace id** in the span and the log line, and bankobs
->   doesn't give us that: the Go/journey tier logs an app `trace_id` that doesn't match Beyla's span
->   ids, and the Java core-banking tier logs only a `correlation_id`. A trace-id log search returns nothing.
-> - **Not automatically by service either** — the classic **Jaeger** datasource keeps a span's service
->   in `process.serviceName`, *not* as a span tag. Grafana's trace→logs can't read it: a `service.name`
->   tag mapping resolves to nothing (so no button renders at all), and the custom query exposes
->   `${__span.spanId|name|tags…}` but **no** service-name variable. So the button can only hand Loki a
->   **time window**; you type the service yourself: `{app="<service>"}`.
+> **Why the trace-id jump works for some services and is empty for others — that split IS the lesson.**
+> Correlating a span to its *exact* log lines needs the **same trace id** stamped into both. bankobs
+> only does that in part:
+> - ✅ **Journey tier** (`loan-origination`, `notification-orchestrator`, `remittance-service`, …) logs
+>   the OTel trace id that Jaeger also has → the button lands on that request's lines.
+> - ❌ **Go payment tier** (`gateway-service`, `payment-gateway`) is traced by **Beyla** (eBPF), which
+>   mints its *own* trace ids — so the app's logged `trace_id` never matches the Jaeger one.
+> - ❌ **Python/Java tiers** (`fraud-detection`, `account-service`, …) don't log a trace id at all.
 >
-> This gap — no shared trace id, no service name crossing the wire — is exactly *why* you reach for a
-> unified, OTel-based stack (collector + a trace-aware store) that stamps one id everywhere and makes
-> this a single click. That contrast is the whole point of wiring it by hand first.
+> So the result is precise where the id propagates and empty where it doesn't. There's no single id
+> crossing every hop — which is exactly *why* you reach for a unified, OTel-based stack (collector +
+> SDK log-correlation) that stamps one trace id into every span **and** every log line. Feeling that
+> gap by hand is the whole point. (`$${...}` in the YAML is Grafana's provisioning env-escape — see the
+> file header.)
 
 > This is the *payoff* module — it deliberately contrasts with the by-hand lab, where the three
 > tools stand alone. Seeing them correlate is the lead-in to "why you reach for a unified stack."
