@@ -127,7 +127,7 @@ metrics: ## 2. Prometheus (Helm) scrapes /metrics directly (no OTel)
 	$(STEP) "Add the Prometheus Helm repo" \
 	        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update prometheus-community"
 	$(STEP) "Install Prometheus (server only) — brings its own RBAC + scrape config (metrics/values.yaml)" \
-	        "helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=180s"
+	        "helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=420s"
 	@echo ""
 	@echo "  ✓ Prometheus is up — but scraping NOTHING from bankobs yet: no service has the"
 	@echo "    prometheus.io/scrape annotation. Opt one in (docs/02), or 'make enable-annotations-to-deploy'."
@@ -151,7 +151,7 @@ logs: ## 3. Loki + Promtail (Helm) tail container stdout (no OTel)
 	$(STEP) "Add the Grafana Helm repo" \
 	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
 	$(STEP) "Install Loki + Promtail from one chart (loki-stack) — see logs/values.yaml" \
-	        "helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f logs/values.yaml && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=180s"
+	        "helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f logs/values.yaml && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=420s"
 	@echo ""
 	@echo "  ✓ Loki + Promtail up; logs are flowing (no app change was needed). Then: make verify-logs"
 	@$(MAKE) -s _url HP=3100 NAME=Loki
@@ -164,13 +164,13 @@ traces: ## 4. Jaeger receives traces straight from the app (no Collector)
 	$(STEP) "Add the Jaeger Helm repo" \
 	        "helm repo add jaegertracing https://jaegertracing.github.io/helm-charts && helm repo update jaegertracing"
 	$(STEP) "Install Jaeger all-in-one (native OTLP, in-memory) — see traces/values.yaml" \
-	        "helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=180s"
+	        "helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=420s"
 	$(STEP) "Expose the Jaeger UI on a NodePort (the chart's UI service is headless)" \
 	        "kubectl apply -f traces/jaeger-ui.yaml"
 	$(STEP) "Turn the SDK back on and point it at Jaeger (metrics+logs stay off OTLP)" \
 	        "kubectl -n $(APP_NS) set env deployment -l domain OTEL_SDK_DISABLED=false MANAGEMENT_TRACING_ENABLED=true OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none OTEL_EXPORTER_OTLP_ENDPOINT=$(JAEGER_OTLP) MANAGEMENT_OTLP_TRACING_ENDPOINT=http://jaeger-collector.$(OBS_NS).svc:4318/v1/traces MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0"
 	$(STEP) "eBPF-instrument the Go payment tier (gateway/payment-gateway/upi) — they have NO in-code OTel (Beyla, traces/beyla.yaml)" \
-	        "kubectl apply -f traces/beyla.yaml && kubectl -n $(OBS_NS) rollout status daemonset/beyla --timeout=120s"
+	        "kubectl apply -f traces/beyla.yaml && kubectl -n $(OBS_NS) rollout status daemonset/beyla --timeout=240s"
 	@echo ""
 	@echo "  ✓ Traces flowing three ways into Jaeger: Python (in-code SDK), Java (Spring OTLP), Go (eBPF/Beyla)."
 	@echo "    Beyla is a privileged DaemonSet scoped by port (8000/8010/8011) so it won't double-trace the OTel tiers."
@@ -192,7 +192,7 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 	$(STEP) "Add the Grafana Helm repo" \
 	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
 	$(STEP) "Install a PLAIN Grafana (no datasources — you add them in the UI)" \
-	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
+	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f grafana/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=300s"
 	@echo ""
 	@echo "  ✓ Grafana up (anonymous admin — no login). Add the datasources by hand in the UI"
 	@echo "    (docs/05-grafana.md) — or run 'make datasources' to register all three at once."
@@ -201,7 +201,7 @@ grafana: ## 5. Grafana (Helm) — plain; you add datasources by hand in the UI (
 datasources: ## Register Prometheus + Loki + Jaeger datasources in one shot (instead of the UI)
 	$(STEP) "Register all three datasources via the Grafana API (prometheus=default, loki, jaeger)" \
 	        "OBS_NS=$(OBS_NS) bash scripts/add-datasources.sh"
-	@echo "  ✓ datasources added + trace↔logs wired (Jaeger 'Logs for this span' → Loki, and back)."
+	@echo "  ✓ datasources added + trace→logs wired (Jaeger 'Logs for this span' → that service's Loki logs)."
 	@echo "    Try them in Explore, or run 'make golden-dashboard'."
 
 golden-dashboard: ## Apply the Golden Signals + Errors dashboards to Grafana (needs a Prometheus datasource)
@@ -219,7 +219,7 @@ correlation: ## Grafana (Helm) over all 3 backends — dashboards + trace<->logs
 	$(STEP) "Add the Grafana Helm repo" \
 	        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update grafana"
 	$(STEP) "Install Grafana with datasources + trace<->logs wiring + overview dashboard" \
-	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f correlation/values-grafana.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=180s"
+	        "helm upgrade --install grafana grafana/grafana -n $(OBS_NS) --create-namespace -f correlation/values-grafana.yaml && kubectl -n $(OBS_NS) rollout status deploy/grafana --timeout=300s"
 	@echo ""
 	@echo "  ✓ Grafana up — open it (dashboard 'bankobs — services overview'):"
 	@$(MAKE) -s _url HP=3000 NAME=Grafana

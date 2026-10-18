@@ -3,9 +3,11 @@
 # and the overview dashboard all ride in here, installed with one `helm upgrade -i`.
 #
 # The correlation is the point:
-#   - Loki  "derivedFields": pull trace_id out of each JSON log line -> link to Jaeger (logs->trace)
-#   - Jaeger "tracesToLogsV2": from a span, query Loki for that trace id                (trace->logs)
-# Both work because bankobs logs are JSON containing "trace_id":"...".
+#   - Jaeger "tracesToLogsV2": from a span, open that service's logs in Loki (trace->logs BY SERVICE,
+#     mapping the span's service.name onto Loki's `app` label).
+# We correlate by service, NOT by trace id, on purpose: bankobs logs do not carry Jaeger's trace id
+# (the Go/journey tier logs an app trace_id that does not match Beyla's span ids; the Java core-banking
+# tier logs only a correlation_id), so a trace-id log search returns nothing.
 
 # Pin Grafana to the latest 13.x (chart appVersion still tracks 12.x, so override the image tag).
 image:
@@ -46,12 +48,6 @@ datasources:
         url: http://loki:3100
         jsonData:
           maxLines: 2000
-          derivedFields:
-            - name: TraceID
-              matcherType: regex
-              matcherRegex: '"trace_id":"(\w+)"'
-              url: '$${__value.raw}'
-              datasourceUid: jaeger
       - name: Jaeger
         type: jaeger
         uid: jaeger
@@ -63,8 +59,10 @@ datasources:
             spanStartTimeShift: '-5m'
             spanEndTimeShift: '5m'
             filterByTraceID: false
-            customQuery: true
-            query: '{namespace="bankobs"} |= "$${__trace.traceId}"'
+            filterBySpanID: false
+            tags:
+              - key: service.name
+                value: app
 
 dashboardProviders:
   dashboardproviders.yaml:

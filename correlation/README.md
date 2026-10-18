@@ -15,20 +15,24 @@ helm upgrade --install grafana grafana/grafana -n monitoring -f correlation/valu
 
 Open Grafana (`make urls` → Grafana, `http://<box>:3000`, anonymous admin — no login):
 - **Dashboard "bankobs — services overview"** — p95 latency / request rate / services up.
-- **Explore → Jaeger** — open a trace, then **"Logs for this span"** jumps to the Loki logs for
-  that trace (**trace → logs**).
-- **Explore → Loki** — a log line's extracted **TraceID** links straight to the trace in Jaeger
-  (**logs → trace**).
+- **Explore → Jaeger** — open a trace, then **"Logs for this span"** jumps to that **service's**
+  logs in Loki for the same time window (**trace → logs, by service**).
 
 ## What's wired (in `values-grafana.yaml`)
 
 | Datasource | Correlation |
 |---|---|
 | Prometheus (`prometheus-server`) | — |
-| Loki | `derivedFields`: regex pulls `"trace_id":"…"` from the JSON log line → link to Jaeger |
-| Jaeger | `tracesToLogsV2`: from a span, query Loki `{namespace="bankobs"} |= "<traceId>"` |
+| Loki | — (queried directly, or reached from a Jaeger span) |
+| Jaeger | `tracesToLogsV2`: from a span, open that service's Loki logs — maps the span's `service.name` onto Loki's `app` label |
 
-Both directions work because bankobs services log structured JSON containing `trace_id`.
+> **Why by service, not by trace id.** You might expect a one-click jump from a span to the *exact*
+> log lines of that request. That needs the **same trace id** in both the span and the log line —
+> and bankobs doesn't give us that: the Go/journey tier logs an app `trace_id` that doesn't match
+> Beyla's span ids, and the Java core-banking tier logs only a `correlation_id`. So a trace-id log
+> search returns nothing. The honest, reliable pivot is **by service**: from a span you open that
+> service's logs for the window. (This gap — no shared trace id across logs and traces — is itself
+> a lead-in to *why* you reach for a unified, OTel-based stack that stamps one trace id everywhere.)
 
 > This is the *payoff* module — it deliberately contrasts with the by-hand lab, where the three
 > tools stand alone. Seeing them correlate is the lead-in to "why you reach for a unified stack."

@@ -33,15 +33,20 @@ and the per-service chart show **`payment-gateway`** and **`gateway-service`** s
 **2. Traces — where in the chain.** Explore → **jaeger** → Service **`payment-gateway`** (or
 `gateway-service`) → open a recent trace. The span that calls `upi-service` **fails** — you'll see
 the error on that hop. (These Go services only appear because **Beyla** eBPF-instruments them;
-without it the trace would have a hole here.) Copy the **trace_id**.
+without it the trace would have a hole here.) Note the **service** on the failing span — that's
+your pivot into the logs.
 
-**3. Logs — the actual cause.** Explore → **loki**:
+**3. Logs — the actual cause.** Explore → **loki**, scope to that service:
 ```
-{namespace="bankobs"} |= "<trace_id>"
+{app="gateway-service"}
 ```
-or go straight to the caller: `{app="gateway-service"}`. You'll find the real message —
-**`ERR_UPSTREAM` / `dial tcp …:8011: connect: connection refused`**. That's upi-service being
-unreachable.
+(or `{app="payment-gateway"}`). You'll find the real message — **`ERR_UPSTREAM` /
+`dial tcp …:8011: connect: connection refused`**. That's upi-service being unreachable.
+
+> **We pivot by service, not by trace id.** bankobs logs don't carry Jaeger's trace id (the Go tier
+> logs an app `trace_id` that doesn't match Beyla's span ids; the Java tier logs a `correlation_id`),
+> so a `|= "<trace_id>"` log search returns nothing. If you've run `make datasources`, the Jaeger
+> span's **"Logs for this span"** button does this pivot for you (service.name → Loki `app`).
 
 **Root cause:** `upi-service` is down; `payment-gateway`/`gateway-service` can't reach it, so they
 return **502 `ERR_UPSTREAM`**.

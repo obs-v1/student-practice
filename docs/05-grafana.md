@@ -33,11 +33,11 @@ Open it (`make urls` → Grafana, `http://<box>:3000`). Sign in at the login pag
 ## Add the three datasources (by hand)
 
 > **In a hurry?** `make datasources` registers all three at once via the Grafana API
-> (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the trace↔logs correlation —
-> Jaeger's "Trace to logs" → Loki (`{namespace="bankobs"} |= "${__trace.traceId}"`) and Loki's
-> derived-field `trace_id` → Jaeger. Do it by hand once (below) to understand what a datasource
-> is, then use the target thereafter. (`make correlation` is the fully-provisioned variant with
-> an overview dashboard baked in.)
+> (`prometheus` set as the default, `loki`, `jaeger`) **and** wires the **trace → logs**
+> correlation — Jaeger's "Logs for this span" opens that service's logs in Loki (by service, see
+> below for why). Do it by hand once (below) to understand what a datasource is, then use the
+> target thereafter. (`make correlation` is the fully-provisioned variant with an overview
+> dashboard baked in.)
 
 In Grafana, go to **Connections → Data sources → Add data source** (the ☰ menu on the left, or
 the URL `/connections/datasources/new`). You'll do this three times. Each datasource is just:
@@ -85,13 +85,12 @@ Two things to know:
 - **These live in Grafana's database**, which in this lab is **not persisted** — restart the
   Grafana pod and your datasources are gone. In production you don't click them in each time;
   you **provision** them from a file so they come back automatically.
-- Provisioning is also how you wire the **trace ↔ logs correlation** (click from a Jaeger span
-  to its Loki logs, and from a log line's `trace_id` back to the trace) — fiddly to set up by
-  hand, trivial as config.
+- Provisioning is also how you wire the **trace → logs correlation** (click from a Jaeger span
+  to that service's Loki logs) — fiddly to set up by hand, trivial as config.
 
 That's exactly what the [`correlation/`](../correlation/README.md) module does: `make
-correlation` installs the *same* Grafana but with all three datasources **and** the trace↔logs
-links pre-provisioned (and an overview dashboard). Run it once you've seen the manual version —
+correlation` installs the *same* Grafana but with all three datasources **and** the trace → logs
+link pre-provisioned (and an overview dashboard). Run it once you've seen the manual version —
 it's the "now automate it" step.
 
 ## Follow an error to its root cause (metrics → traces → logs)
@@ -136,31 +135,36 @@ If you skip this, Jaeger will be empty and you can still do **metrics → logs**
 2. **Where in the call chain?** Open the **jaeger** datasource (Explore, or the Jaeger UI) →
    **Search** → `service = upi-service`, add tag **`error=true`**, set the time range to the
    spike → **Run**. Open a failing trace: the **red / errored span** is the exact hop that
-   broke (e.g. `upi-service → account-service → Oracle`). Note its **`trace_id`**.
+   broke (e.g. `upi-service → account-service → Oracle`). Note the **service** on that span.
 
-3. **Why?** Pivot to the **loki** datasource and pull every log line for that one request:
+3. **Why?** Pivot to the **loki** datasource and pull that service's log lines for the window:
 
    ```
-   {namespace="bankobs"} |= "<trace_id>"
+   {app="upi-service"}
    ```
 
    Those lines carry the real cause — the exception, the failing dependency, the SQL error
-   (e.g. `ERR_DEBIT`, `HikariPool timeout`, `relation ... does not exist`). That is your
+   (e.g. `ERR_UPSTREAM`, `connection refused`, `relation ... does not exist`). That is your
    **why**.
 
-> **Remember the label is `app`, not `service`.** To scope logs to one service use
-> `{app="upi-service"}` (the `service` value lives *inside* the JSON line, reachable with
-> `| json | service="upi-service"`, but it is not a stream label).
+> **Why by service, not by trace id?** You might expect to paste the span's trace id into Loki and
+> get *exactly* that request's lines. That needs the **same trace id** in both the span and the log
+> — and bankobs doesn't provide it: the Go/journey tier logs an app `trace_id` that doesn't match
+> Beyla's span ids, and the Java core-banking tier logs only a `correlation_id`. So a trace-id log
+> search returns nothing. You scope by the **service** instead.
 
-### Two ways to make the trace↔logs hop
+> **The Loki stream label is `app`, not `service`.** Use `{app="upi-service"}` (the `service`
+> value also lives *inside* the JSON line, reachable with `| json | service="upi-service"`, but it
+> is not a stream label).
 
-- **By hand (what you have now):** copy the `trace_id` from the Jaeger span and paste it into
-  the Loki query above. Works, but it is copy-paste.
-- **One click (`make correlation`):** this provisions the datasources with the links, so a
-  Jaeger span grows a **"Logs for this span"** button (jumps straight to the Loki logs for that
-  trace) and a Loki line's **`trace_id`** becomes a link back into Jaeger. It is the same
-  journey, without the copy-paste — the `derivedFields` (Loki→Jaeger) and `tracesToLogsV2`
-  (Jaeger→Loki) that a hand-added datasource does not have.
+### Two ways to make the trace → logs hop
+
+- **By hand (what you have now):** read the **service** off the Jaeger span and query
+  `{app="<service>"}` in Loki for the same window. Works, but it is two steps.
+- **One click (`make datasources` / `make correlation`):** this provisions the Jaeger datasource
+  with `tracesToLogsV2`, so a span grows a **"Logs for this span"** button that opens that
+  service's Loki logs for the window automatically — the same journey, mapped from the span's
+  `service.name` onto Loki's `app` label.
 
 ### No traces? Metrics → logs still gets you most of the way
 

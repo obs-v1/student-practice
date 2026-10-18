@@ -31,8 +31,10 @@ fast. (`make app`, below, runs this for you and then turns telemetry off.)
 > This deploys **no** observability stack — no Prometheus, no Loki, no Jaeger, no OTel
 > Collector. That's the point: an empty canvas you wire up by hand in the next sections.
 
-> **License:** the images need a `LICENSE_KEY`. Put yours in `bankobs/.env`
-> (`cp bankobs/.env.example bankobs/.env`) or pass it inline: `LICENSE_KEY=... make -C bankobs deploy`.
+> **License:** the images need a `LICENSE_KEY`, and this lab **ships a student-tier one** — the
+> deploy writes `bankobs/.env` from `bankobs/.env.example` with it baked in, so `make app` works
+> out of the box with no setup. (To use your own instead, pass it inline:
+> `LICENSE_KEY=... make -C bankobs deploy`.)
 
 ## Start from silence
 

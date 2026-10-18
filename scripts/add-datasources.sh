@@ -6,10 +6,13 @@
 #
 #   scripts/add-datasources.sh
 #
-# Besides the three datasources it also wires the trace<->logs CORRELATION so you can click
+# Besides the three datasources it also wires the trace->logs CORRELATION so you can click
 # straight across in Explore:
-#   - Jaeger "Trace to logs"  (tracesToLogsV2) -> Loki, query {namespace="bankobs"} |= traceID
-#   - Loki  "Derived fields"  (derivedFields)  -> Jaeger, from each JSON line's "trace_id"
+#   - Jaeger "Trace to logs" (tracesToLogsV2) -> Loki, BY SERVICE: the span's service.name maps
+#     to Loki's `app` label, so "Logs for this span" opens that service's logs for the window.
+# NOTE: we correlate by service, NOT by trace id, on purpose — bankobs logs do not carry Jaeger's
+# trace id (the Go/journey tier logs an app trace_id that does not match Beyla's span ids, and the
+# Java core-banking tier logs only a correlation_id), so a trace-id log search finds nothing.
 #
 # Idempotent AND uid-stable: an existing datasource is UPDATED in place (uid preserved), so a
 # re-run never breaks a dashboard already bound to it. Only a missing datasource is created.
@@ -78,36 +81,24 @@ for ds in WANT:
     print(f"  {'✓' if ok else '✗'} {ds['name']:11} -> {ds['url']}  ({'uid '+str(uid) if ok else resp.get('message', resp)})")
     rc = rc or (0 if ok else 1)
 
-# pass 2 — wire the correlation now that all three uids are known
+# pass 2 — wire trace->logs correlation (BY SERVICE) now that the uids are known.
+# The span's service.name is mapped onto Loki's `app` label, so "Logs for this span" opens that
+# service's logs for the same time window. We deliberately do NOT filter by trace id: bankobs logs
+# don't carry Jaeger's trace id, so a trace-id search would return nothing (see header note).
 if uids.get("jaeger") and uids.get("loki") and uids.get("prometheus"):
-    # Jaeger -> Loki  (Trace to logs)
     jbody = {**WANT[2], "uid": uids["jaeger"],
              "jsonData": {
                  "tracesToLogsV2": {
                      "datasourceUid": uids["loki"],
                      "spanStartTimeShift": "-2m", "spanEndTimeShift": "2m",
                      "filterByTraceID": False, "filterBySpanID": False,
-                     "customQuery": True,
-                     "query": '{namespace="bankobs"} |= "${__trace.traceId}"',
+                     "tags": [{"key": "service.name", "value": "app"}],
                  }}}
     st, _ = call("PUT", f"/api/datasources/uid/{uids['jaeger']}", jbody)
-    print(f"  {'✓' if st==200 else '✗'} jaeger  Trace-to-logs -> loki  ({'ok' if st==200 else st})")
+    print(f"  {'✓' if st==200 else '✗'} jaeger  Trace-to-logs -> loki  (by service.name -> app)  ({'ok' if st==200 else st})")
     rc = rc or (0 if st==200 else 1)
 
-    # Loki -> Jaeger  (Derived fields: pull trace_id out of the JSON log line)
-    lbody = {**WANT[1], "uid": uids["loki"],
-             "jsonData": {
-                 "derivedFields": [{
-                     "name": "TraceID",
-                     "matcherRegex": r'"trace_id":"(\w+)"',
-                     "url": "${__value.raw}",
-                     "datasourceUid": uids["jaeger"],
-                 }]}}
-    st, _ = call("PUT", f"/api/datasources/uid/{uids['loki']}", lbody)
-    print(f"  {'✓' if st==200 else '✗'} loki    Derived-field trace_id -> jaeger  ({'ok' if st==200 else st})")
-    rc = rc or (0 if st==200 else 1)
-
-print("  all datasources registered + trace<->logs wired (prometheus is the default)." if rc == 0
+print("  all datasources registered + trace->logs wired by service (prometheus is the default)." if rc == 0
       else "  ⚠ something failed — see above.")
 sys.exit(rc)
 PY

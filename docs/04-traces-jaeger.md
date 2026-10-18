@@ -106,7 +106,7 @@ make traffic            # generate journeys
 make verify-traces      # which services have reported traces to Jaeger?
 ```
 
-Open the Jaeger UI (`make urls` → Jaeger, default `http://<node>:30686`):
+Open the Jaeger UI (`make urls` → Jaeger, default `http://<box>:16686`):
 - pick a service like `upi-service` or `gateway-service` → **Find Traces**,
 - open a payment trace and see the waterfall span the whole fleet.
 
