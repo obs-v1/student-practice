@@ -64,7 +64,6 @@ Uncomment it, then redeploy the app so the change lands:
 
 ```bash
 make enable-annotations-to-deploy # Uncomment for all the services at once.
-make app          # helm upgrade — rolls upi-service with the annotation
 ```
 
 (For a quick one-off without editing the chart, you can annotate the running deployment
