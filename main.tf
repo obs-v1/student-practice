@@ -26,8 +26,20 @@ variable "region" {
 }
 
 variable "ami" {
-  description = "Base AMI (ec2-user, SSH password auth baked in). Default is a RHEL 9 us-east-1 image; install-tools.sh handles RHEL (real Docker CE + LVM disk grow)."
-  default     = "ami-0220d79f3f480ecf5"
+  description = "Override the base AMI by ID. Leave empty to auto-resolve the lab AMI ('Redhat-9-DevOps-Practice') by name via the aws_ami data source below — IDs are region-specific and get deregistered, so prefer the lookup. install-tools.sh handles RHEL (real Docker CE + LVM disk grow)."
+  default     = ""
+}
+
+# Resolve the lab AMI by name instead of pinning a region-specific ID. Owner
+# 973714476881 publishes "Redhat-9-DevOps-Practice" (ec2-user, SSH password auth baked in).
+data "aws_ami" "lab" {
+  most_recent = true
+  owners      = ["973714476881"]
+
+  filter {
+    name   = "name"
+    values = ["Redhat-9-DevOps-Practice"]
+  }
 }
 
 variable "instance_type" {
@@ -89,7 +101,7 @@ resource "aws_security_group" "all_open" {
 }
 
 resource "aws_instance" "lab" {
-  ami           = var.ami
+  ami           = var.ami != "" ? var.ami : data.aws_ami.lab.id
   instance_type = var.instance_type
 
   vpc_security_group_ids = [aws_security_group.ssh.id, aws_security_group.all_open.id]
