@@ -148,6 +148,13 @@ config:
         # hint tells the `loki` exporter to promote them to Loki stream labels. k8s_container_name
         # is the service name (e.g. account-service), which is what the trace→logs drill selects on.
         - { key: loki.resource.labels, value: "k8s.namespace.name, k8s.container.name, k8s.pod.name", action: insert }
+        # LOKI LINE FORMAT. Without this, the `loki` exporter serializes the WHOLE OTLP record as
+        # JSON — {"body":"…","attributes":{…},"resources":{…}} — and because the bankobs apps
+        # already log JSON to stdout, their line lands as an ESCAPED STRING inside `body`: you get
+        # "JSON of JSON" in Explore. `raw` makes the Loki line the log BODY verbatim (the app's own
+        # single-level JSON), which Grafana parses into fields, and the trace_id derived-field
+        # (trace_id\W+(\w+)) still matches. Stream labels (above) are unaffected.
+        - { key: loki.format, value: raw, action: insert }
 
   exporters:
     # TRACES → the existing Jaeger all-in-one's native OTLP receiver.
