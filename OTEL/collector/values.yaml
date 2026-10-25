@@ -28,8 +28,8 @@
 # CONTRIB image: the `prometheusremotewrite` and `loki` exporters live in
 # opentelemetry-collector-contrib, not the core image. `command.name` is otelcol-contrib.
 #
-# CHART PINNED in the Makefile (OTEL_CHART_VER=0.93.3 → appVersion 0.102.1). A floating chart
-# auto-renames the `otlp` exporter to `otlp_grpc`, which the pinned 0.102.1 binary rejects.
+# CHART PINNED in the Makefile (OTEL_CHART_VER=0.176.0 → appVersion 0.162.0). Pin both the chart
+# and the image tag together so a future chart release can't drift the collector binary under you.
 
 mode: daemonset
 fullnameOverride: otel-collector     # -> DaemonSet "otel-collector-agent"; Service "otel-collector"
@@ -42,11 +42,10 @@ service:
 
 image:
   repository: otel/opentelemetry-collector-contrib
-  # Pinned deliberately: the `loki` exporter was DEPRECATED and later REMOVED from contrib.
-  # 0.102.1 still ships it, which we need because the lab's Loki is 2.9.8 (no native OTLP
-  # ingest — that is Loki 3.x). If you move to Loki 3.x, drop the `loki` exporter for a plain
-  # otlphttp to http://loki:3100/otlp and you can use a newer collector. See docs/04.
-  tag: "0.102.1"
+  # Modern contrib. The old `loki` exporter was removed from contrib (~v0.147), so logs now go
+  # out as native OTLP (otlphttp → Loki 3.x /otlp — see the exporters block + loki-values.yaml).
+  # Keep this tag matched to the chart's appVersion (chart 0.176.0 → appVersion 0.162.0).
+  tag: "0.162.0"
 command:
   name: otelcol-contrib
 
@@ -142,19 +141,12 @@ config:
     resource:
       attributes:
         - { key: deployment.environment, value: training, action: upsert }
-        # LOKI STREAM LABELS. Loki rejects a push with no labels ("at least one label pair is
-        # required per stream"). The filelog receiver's `container` operator already parses
-        # k8s.namespace.name / k8s.pod.name / k8s.container.name off each log file's path; this
-        # hint tells the `loki` exporter to promote them to Loki stream labels. k8s_container_name
-        # is the service name (e.g. account-service), which is what the trace→logs drill selects on.
-        - { key: loki.resource.labels, value: "k8s.namespace.name, k8s.container.name, k8s.pod.name", action: insert }
-        # LOKI LINE FORMAT. Without this, the `loki` exporter serializes the WHOLE OTLP record as
-        # JSON — {"body":"…","attributes":{…},"resources":{…}} — and because the bankobs apps
-        # already log JSON to stdout, their line lands as an ESCAPED STRING inside `body`: you get
-        # "JSON of JSON" in Explore. `raw` makes the Loki line the log BODY verbatim (the app's own
-        # single-level JSON), which Grafana parses into fields, and the trace_id derived-field
-        # (trace_id\W+(\w+)) still matches. Stream labels (above) are unaffected.
-        - { key: loki.format, value: raw, action: insert }
+        # NOTE: with the native OTLP path (otlphttp → Loki 3.x /otlp) there is no `loki` exporter,
+        # so the old loki.resource.labels / loki.format hints are gone. Loki 3.x stores the log
+        # BODY verbatim as the line (the app's own single-level JSON — no more "JSON of JSON"),
+        # keeps resource/log attributes as structured metadata, and promotes a chosen few to index
+        # labels via its OWN otlp_config (k8s_namespace_name / k8s_container_name / k8s_pod_name —
+        # see OTEL/collector/loki-values.yaml).
 
   exporters:
     # TRACES → the existing Jaeger all-in-one's native OTLP receiver.
@@ -171,15 +163,15 @@ config:
       endpoint: http://prometheus-server.monitoring.svc/api/v1/write
       tls: { insecure: true }
 
-    # LOGS → Loki's push API. (Loki 2.9.8 has no OTLP endpoint, so the contrib `loki` exporter,
-    # which speaks Loki's push protocol.) Promote a couple of resource attrs to Loki stream
-    # labels so you can select by service in Explore ( {app="account-service"} ).
-    loki:
-      endpoint: http://loki.monitoring.svc:3100/loki/api/v1/push
-      # Stream labels come from the loki.resource.labels hint set in the resource processor.
-      default_labels_enabled:
-        exporter: false
-        job: false
+    # LOGS → Loki's NATIVE OTLP endpoint (/otlp). The old contrib `loki` exporter was removed
+    # from the Collector (~v0.147), so logs now go out as plain OTLP over HTTP. This requires
+    # Loki 3.x (2.9.8 had no OTLP ingest) — the lab's Loki is installed as grafana/loki 3.x in
+    # SingleBinary mode (see OTEL/collector/loki-values.yaml). Stream labels are no longer a
+    # collector hint; Loki decides them from resource attributes via its own otlp_config
+    # (we keep k8s_namespace_name / k8s_container_name / k8s_pod_name as index labels there).
+    otlphttp/loki:
+      endpoint: http://loki.monitoring.svc:3100/otlp
+      tls: { insecure: true }
 
     # one-line summary of every batch in the collector's own logs — first stop when something
     # is not arriving ( kubectl -n monitoring logs daemonset/otel-collector ).
@@ -206,4 +198,4 @@ config:
       logs:
         receivers:  [filelog]
         processors: [memory_limiter, resource, batch]
-        exporters:  [loki]
+        exporters:  [otlphttp/loki, debug]

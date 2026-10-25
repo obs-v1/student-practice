@@ -21,11 +21,13 @@
 APP_NS       ?= bankobs
 OBS_NS       ?= monitoring
 COLLECTOR    ?= http://otel-collector.$(OBS_NS).svc:4317
-# Pin the collector CHART to match the pinned contrib IMAGE (0.102.1). The chart must NOT be
-# left floating: a newer chart auto-renames the `otlp` exporter to `otlp_grpc`, which the
-# 0.102.1 binary does not recognise -> the collector crashloops ("unknown type otlp_grpc").
-# Chart 0.93.3 ships appVersion 0.102.1 and predates that rename.
-OTEL_CHART_VER ?= 0.93.3
+# Pin the collector CHART to match the pinned contrib IMAGE (collector/values.yaml tag 0.162.0).
+# Chart 0.176.0 ships appVersion 0.162.0. Pin both together so a chart bump can't drift the
+# binary under the config. (This image is well past v0.147, where the old `loki` exporter was
+# removed — logs now ship as native OTLP to Loki 3.x; see LOKI_CHART_VER + collector/loki-values.yaml.)
+OTEL_CHART_VER ?= 0.176.0
+# Loki 3.x (grafana/loki chart), installed by `backends` in SingleBinary mode for the OTLP path.
+LOKI_CHART_VER ?= 7.3.0
 # PARENT = the by-hand lab (reused backends live there). Keep the comment on its OWN line:
 # an inline "# ..." after the value makes Make keep the alignment spaces as trailing chars,
 # so $(PARENT) becomes "..<spaces>" and every $(PARENT)/path step breaks.
@@ -69,8 +71,8 @@ backends: ## 1. Install Prometheus + Loki + Jaeger (reuses ../metrics ../logs ..
 	$(SECTION) "1" "The backends (reused)" "Same Prometheus, Loki and Jaeger as the by-hand lab. The Collector will export TO them."
 	$(STEP) "Prometheus (Helm) — the parent lab's exact values" \
 	        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1; helm repo update prometheus-community >/dev/null; helm upgrade --install prometheus prometheus-community/prometheus -n $(OBS_NS) --create-namespace -f $(PARENT)/metrics/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/prometheus-server --timeout=180s"
-	$(STEP) "Loki (Helm) — WITHOUT Promtail: the Collector's filelog receiver tails logs instead" \
-	        "helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1; helm repo update grafana >/dev/null; helm upgrade --install loki grafana/loki-stack -n $(OBS_NS) --create-namespace -f $(PARENT)/logs/values.yaml --set promtail.enabled=false && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=180s"
+	$(STEP) "Loki 3.x (Helm, SingleBinary) — native OTLP ingest at /otlp; no Promtail (the Collector tails logs)" \
+	        "helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1; helm repo update grafana >/dev/null; helm upgrade --install loki grafana/loki --version $(LOKI_CHART_VER) -n $(OBS_NS) --create-namespace -f collector/loki-values.yaml && kubectl -n $(OBS_NS) rollout status statefulset/loki --timeout=300s"
 	$(STEP) "Jaeger all-in-one (Helm) + its NodePort UI — the parent lab's exact values" \
 	        "helm repo add jaegertracing https://jaegertracing.github.io/helm-charts >/dev/null 2>&1; helm repo update jaegertracing >/dev/null; helm upgrade --install jaeger jaegertracing/jaeger --version 3.4.1 -n $(OBS_NS) --create-namespace -f $(PARENT)/traces/values.yaml && kubectl -n $(OBS_NS) rollout status deploy/jaeger --timeout=180s && kubectl apply -f $(PARENT)/traces/jaeger-ui.yaml"
 	@echo ""

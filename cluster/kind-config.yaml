@@ -24,3 +24,5 @@ nodes:
       - { containerPort: 30686, hostPort: 16686, protocol: TCP }   # Jaeger UI
       - { containerPort: 30300, hostPort: 3000,  protocol: TCP }   # Grafana UI (correlation)
       - { containerPort: 30310, hostPort: 3100,  protocol: TCP }   # Loki API (logs)
+      - { containerPort: 30099, hostPort: 9099,  protocol: TCP }   # Pyrra UI (SLO error-budget + burn rate — lab 3.1.10)
+      - { containerPort: 30993, hostPort: 9093,  protocol: TCP }   # Alertmanager UI (burn-rate alerts — lab 3.1.10)
