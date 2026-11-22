@@ -1,0 +1,41 @@
+# A single sample application for the 4.2.6 profiling demo — runs INSIDE Kubernetes.
+# Plain python, NO profiling SDK, NO agent sidecar: nothing is added to it. The host eBPF
+# agent profiles it from the kernel like any other process on the node.
+# It just burns CPU "signing" fake payments, so its CPU flame graph is non-trivial.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-processor
+  namespace: profiling
+  labels: { app: payment-processor }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payment-processor } }
+  template:
+    metadata:
+      labels: { app: payment-processor }
+    spec:
+      containers:
+        - name: payment-processor
+          image: python:3.12-slim
+          command:
+            - python3
+            - -u
+            - -c
+            - |
+              import hashlib
+              # a deliberately hot call path so the flame graph has shape
+              def sign_transaction(txn: bytes) -> bytes:
+                  h = txn
+                  for _ in range(50000):
+                      h = hashlib.sha256(h).digest()
+                  return h
+              def process_payment(i: int) -> bytes:
+                  return sign_transaction(f"pay:{i}:acct:{i % 1000}".encode())
+              i = 0
+              while True:
+                  process_payment(i)
+                  i += 1
+          resources:
+            requests: { cpu: 250m, memory: 64Mi }
+            limits:   { cpu: "1",  memory: 128Mi }

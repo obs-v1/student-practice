@@ -1,7 +1,7 @@
 # 4.2.6 — zero-instrumentation profiling (Pyroscope + eBPF)
 
-A 15-minute, **Linux-only** demo: CPU flame graphs for *every* process on the node, with nothing
-added to any application — no SDK, no restart.
+A 15-minute, **Linux-only** demo: profile an application running **inside Kubernetes** without
+touching it — no SDK, no sidecar, no restart. The CPU flame graph comes straight from the kernel.
 
 ## Why the agent runs on the host (not a DaemonSet)
 
@@ -10,13 +10,23 @@ cluster is **kind**, where the "node" is itself a Docker container. The eBPF pro
 OpenTelemetry/Elastic profiler that **both** Parca's agent and Grafana Alloy's `pyroscope.ebpf`
 build on — cannot load one layer down inside that nested container (it fails its *system analysis*
 step). So here the agent runs on the **host** (the box kind runs on), where the real kernel is. With
-`--pid=host` it still profiles every process on the node, because in kind the cluster's containers
-*are* host processes.
+`--pid=host` it still profiles every process on the node — **including the app's Pod**, because in
+kind the cluster's containers *are* host processes.
 
 > Verified: the same Alloy profiler fails inside the kind node but prints `eBPF tracer loaded` on the
-> host. Same eBPF, same result — only the placement differs.
+> host. Same eBPF, same result — only the placement differs. The **application** stays in Kubernetes;
+> only the sensor sits on the node (which, on a real cluster, is exactly where the DaemonSet runs).
 
-## 1. Pyroscope server (in the cluster)
+## 1. The app to profile (in Kubernetes)
+
+```bash
+kubectl apply -f profiling/sample-app.yaml     # Deployment 'payment-processor', plain python, no SDK
+```
+
+A one-Pod `payment-processor` that burns CPU "signing" fake payments. **Nothing is added to it** —
+no profiling library, no sidecar.
+
+## 2. Pyroscope server (in the cluster)
 
 ```bash
 kubectl apply -f profiling/pyroscope-server.yaml     # grafana/pyroscope:2.4.4, NodePort 30040
@@ -26,7 +36,7 @@ The Service is a **NodePort (30040)**, and `cluster/kind-config.yaml` already pu
 host as **`:4040`** — so the UI is at **`http://<box-ip>:4040`** and the host agent reaches it at
 `http://localhost:4040`. No port-forward, no tunnel.
 
-## 2. The eBPF agent (on the host)
+## 3. The eBPF agent (on the host)
 
 ```bash
 docker run -d --name alloy-ebpf --privileged --pid=host --network=host \
@@ -40,13 +50,13 @@ docker logs alloy-ebpf | grep 'eBPF tracer loaded'   # the agent attached to the
 `config.alloy` discovers every process, names it by its executable, profiles it with eBPF, and ships
 to `http://localhost:4040` — no edits needed.
 
-## 3. Read a process
+## 4. Read the app
 
-Open **`http://<box-ip>:4040`**, pick the `process_cpu` profile type, and choose a service —
-`kube-apiserver`, `etcd`, `kubelet`, `containerd`, `coredns`, none of which you instrumented. A
-`kube-apiserver` flame graph shows Go-runtime frames **and** kernel frames (`do_syscall_64`) in one
-stack — the user+kernel truth eBPF gives you. Once the app is running (`make app`), the payment
-tier's process appears the same way.
+Open **`http://<box-ip>:4040`**, pick the `process_cpu` profile type, and choose the
+`payment-processor`'s process — `/usr/local/bin/python3.12` (eBPF names processes by their
+executable). Within ~30 s its CPU flame graph is there: the `sign_transaction` → `hashlib` hot path
+down into kernel frames — **with nothing added to the app.** The same dropdown also lists every other
+process on the node (`kube-apiserver`, `etcd`, `kubelet`, …), all profiled the same way.
 
 > `:4040` must be open on the box's security group to reach the UI from a browser; otherwise use an
 > SSH tunnel: `ssh -L 4040:localhost:4040 ec2-user@<box-ip>` then open `http://localhost:4040`.
