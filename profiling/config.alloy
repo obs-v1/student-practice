@@ -1,0 +1,27 @@
+// config.alloy — zero-instrumentation CPU profiling of every process on the node.
+//
+// Run Alloy with THIS config ON THE HOST (not inside kind) — see README.md. The eBPF profiler
+// engine (shared by Parca and Pyroscope/Alloy) can't load inside the nested kind node, so the
+// agent runs on the box where the real kernel is. With --pid=host it still sees every process
+// on the node, the cluster's containers included.
+
+discovery.process "all" { }
+
+// name each process by its executable, so flame graphs are per-process (not "unspecified")
+discovery.relabel "named" {
+  targets = discovery.process.all.targets
+  rule {
+    source_labels = ["__meta_process_exe"]
+    target_label  = "service_name"
+  }
+}
+
+pyroscope.ebpf "kernelwide" {
+  forward_to = [pyroscope.write.store.receiver]
+  targets    = discovery.relabel.named.output
+}
+
+pyroscope.write "store" {
+  // the kind node's IP + the pyroscope NodePort (see README.md, step 1)
+  endpoint { url = "http://NODE_IP:30040" }
+}

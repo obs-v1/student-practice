@@ -1,0 +1,39 @@
+# Pyroscope server — the profile store + UI — for the 4.2.6 eBPF demo.
+# Runs in the kind cluster. The eBPF AGENT is NOT here: it runs on the host (see README.md),
+# because the shared OTel/Elastic eBPF engine can't load inside the nested kind node.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: profiling
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pyroscope
+  namespace: profiling
+  labels: { app: pyroscope }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: pyroscope } }
+  template:
+    metadata:
+      labels: { app: pyroscope }
+    spec:
+      containers:
+        - name: pyroscope
+          image: grafana/pyroscope:2.4.4
+          args: ["-target=all", "-server.http-listen-port=4040"]
+          ports: [{ containerPort: 4040, name: http }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pyroscope
+  namespace: profiling
+spec:
+  selector: { app: pyroscope }
+  ports: [{ name: http, port: 4040, targetPort: 4040 }]
