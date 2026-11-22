@@ -22,6 +22,7 @@ pyroscope.ebpf "kernelwide" {
 }
 
 pyroscope.write "store" {
-  // the kind node's IP + the pyroscope NodePort (see README.md, step 1)
-  endpoint { url = "http://NODE_IP:30040" }
+  // kind publishes the Pyroscope NodePort on the host as :4040 (cluster/kind-config.yaml),
+  // and this agent runs on the host with --network=host, so localhost:4040 reaches it.
+  endpoint { url = "http://localhost:4040" }
 }

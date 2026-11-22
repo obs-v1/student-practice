@@ -35,5 +35,9 @@ metadata:
   name: pyroscope
   namespace: profiling
 spec:
+  # NodePort 30040 is published on the host as :4040 by cluster/kind-config.yaml
+  # (extraPortMappings) — so the UI is at http://<box-ip>:4040 with no port-forward,
+  # and the host-run eBPF agent reaches it at http://localhost:4040.
+  type: NodePort
   selector: { app: pyroscope }
-  ports: [{ name: http, port: 4040, targetPort: 4040 }]
+  ports: [{ name: http, port: 4040, targetPort: 4040, nodePort: 30040 }]
