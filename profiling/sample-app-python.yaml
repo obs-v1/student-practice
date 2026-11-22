@@ -1,0 +1,41 @@
+# OPTIONAL second-lesson app (interpreted language) for 4.2.6.
+# Same idea as sample-app.yaml, but Python. Use it AFTER the Go app to show the eBPF limit:
+# eBPF nails the native work (OpenSSL SHA256_Final) but can't fully reconstruct the Python
+# call chain, so process_payment/sign_transaction stay faint while the C frames dominate.
+# (A Python SDK profiler would show them — but that needs instrumenting the app.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-processor-py
+  namespace: profiling
+  labels: { app: payment-processor-py }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payment-processor-py } }
+  template:
+    metadata:
+      labels: { app: payment-processor-py }
+    spec:
+      containers:
+        - name: payment-processor-py
+          image: python:3.12-slim
+          command:
+            - python3
+            - -u
+            - -c
+            - |
+              import hashlib
+              def sign_transaction(txn: bytes) -> bytes:
+                  h = txn
+                  for _ in range(50000):
+                      h = hashlib.sha256(h).digest()
+                  return h
+              def process_payment(i: int) -> bytes:
+                  return sign_transaction(f"pay:{i}:acct:{i % 1000}".encode())
+              i = 0
+              while True:
+                  process_payment(i)
+                  i += 1
+          resources:
+            requests: { cpu: 250m, memory: 64Mi }
+            limits:   { cpu: "1",  memory: 128Mi }

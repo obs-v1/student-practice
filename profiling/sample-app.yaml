@@ -1,7 +1,47 @@
-# A single sample application for the 4.2.6 profiling demo — runs INSIDE Kubernetes.
-# Plain python, NO profiling SDK, NO agent sidecar: nothing is added to it. The host eBPF
-# agent profiles it from the kernel like any other process on the node.
-# It just burns CPU "signing" fake payments, so its CPU flame graph is non-trivial.
+# The sample application for the 4.2.6 profiling demo — a tiny Go service, runs INSIDE Kubernetes.
+# Go compiles to a native binary WITH symbols + frame pointers, so the eBPF profiler shows the
+# app's OWN functions (main.processPayment, main.signTransaction) as the big blocks in the flame
+# graph — which is what you want a beginner to see first. No image to build/push: it compiles the
+# source (mounted from the ConfigMap) at container start, then runs /payment-processor.
+# NOTHING is added to it — no profiling SDK, no sidecar. The host eBPF agent profiles it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-processor-src
+  namespace: profiling
+data:
+  go.mod: |
+    module payment-processor
+
+    go 1.21
+  main.go: |
+    package main
+
+    import (
+    	"crypto/sha256"
+    	"fmt"
+    )
+
+    // signTransaction burns CPU "signing" a payment: hash the digest 50,000 times.
+    func signTransaction(txn []byte) [32]byte {
+    	h := sha256.Sum256(txn)
+    	for i := 0; i < 50000; i++ {
+    		h = sha256.Sum256(h[:])
+    	}
+    	return h
+    }
+
+    func processPayment(i int) [32]byte {
+    	txn := []byte(fmt.Sprintf("pay:%d:acct:%d", i, i%1000))
+    	return signTransaction(txn)
+    }
+
+    func main() {
+    	for i := 0; ; i++ {
+    		processPayment(i)
+    	}
+    }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,25 +57,14 @@ spec:
     spec:
       containers:
         - name: payment-processor
-          image: python:3.12-slim
-          command:
-            - python3
-            - -u
-            - -c
-            - |
-              import hashlib
-              # a deliberately hot call path so the flame graph has shape
-              def sign_transaction(txn: bytes) -> bytes:
-                  h = txn
-                  for _ in range(50000):
-                      h = hashlib.sha256(h).digest()
-                  return h
-              def process_payment(i: int) -> bytes:
-                  return sign_transaction(f"pay:{i}:acct:{i % 1000}".encode())
-              i = 0
-              while True:
-                  process_payment(i)
-                  i += 1
+          image: golang:1.23-alpine
+          # compile the mounted source once, then exec the binary (so the process is /payment-processor)
+          command: ["sh", "-c", "cd /src && CGO_ENABLED=0 go build -o /payment-processor . && exec /payment-processor"]
+          volumeMounts:
+            - { name: src, mountPath: /src }
           resources:
-            requests: { cpu: 250m, memory: 64Mi }
-            limits:   { cpu: "1",  memory: 128Mi }
+            requests: { cpu: 250m, memory: 128Mi }
+            limits:   { cpu: "1",  memory: 512Mi }
+      volumes:
+        - name: src
+          configMap: { name: payment-processor-src }
